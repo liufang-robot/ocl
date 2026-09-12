@@ -115,9 +115,10 @@
 	  </row>
 	  <row>
 	    <entry>ls</entry>
-	    <entry>[peer]</entry>
-	    <entry>Lists the interface and status of a Component. Without peer, 
-	    the current visited component is shown.</entry>
+	    <entry>[peer or service]</entry>
+	    <entry>Lists the interface and status of a component or service. Without
+            an argument, the current visited component is shown. Connected input
+            ports also list their output sources and selected members.</entry>
 	  </row>
 	  <row>
 	    <entry>cd</entry>
@@ -243,5 +244,32 @@
       </tgroup>
     </table>
     
+    <section>
+      <title>Inspecting input connections</title>
+      <para>
+        Use <literal>ls sink.io</literal> to inspect a peer's service ports, or
+        <literal>ls io</literal> when visiting the sink. Each connected input
+        lists the output endpoint that supplies it. Member mappings appear
+        below the port's type, value, and connection status:
+      </para>
+      <programlisting>input.x &lt;- scalar_source.output
+input.y &lt;- pair_source.output.y
+whole &lt;- pair_source.output
+selected &lt;- pair_source.output.z</programlisting>
+      <para>
+        The left side is relative to the displayed service. The right side
+        includes the source component and any nested services. A whole-port
+        connection has no member suffix. Fixed-array selections retain their
+        indices, for example <literal>input.values[2]</literal>. Listings show
+        the current graph, including disconnects and reconnects; they do not
+        consume input samples. <literal>help io</literal> displays the same
+        source information with the service's detailed interface.
+      </para>
+      <para>
+        A connection whose output identity is unavailable, such as an external
+        transport stream, displays <literal>&lt;source unavailable&gt;</literal>.
+        Unconnected inputs have no source lines.
+      </para>
+    </section>
   </section>
 </article>

@@ -6,9 +6,13 @@
 #include <boost/intrusive_ptr.hpp>
 #include <boost/serialization/nvp.hpp>
 #include <rtt/internal/DataSources.hpp>
+#include <rtt/internal/PortDataAccess.hpp>
+#include <rtt/InputPort.hpp>
+#include <rtt/OutputPort.hpp>
 #include <rtt/Property.hpp>
 #include <rtt/PropertyBag.hpp>
 #include <rtt/TaskContext.hpp>
+#include <rtt/extras/SlaveActivity.hpp>
 #include <rtt/typekit/RealTimeTypekit.hpp>
 #include <rtt/types/SequenceTypeInfo.hpp>
 #include <rtt/types/StructTypeInfo.hpp>
@@ -240,6 +244,17 @@ public:
     printResult(source.get(), recurse);
     return sresult.str();
   }
+
+  std::string listing(const std::string &path = "", bool serviceHelp = false) {
+    std::ostringstream output;
+    struct RestoreOutput {
+      std::streambuf *previous;
+      ~RestoreOutput() { std::cout.rdbuf(previous); }
+    } restore{std::cout.rdbuf(output.rdbuf())};
+    if (serviceHelp) printService(path);
+    else printInfo(path);
+    return output.str();
+  }
 };
 
 struct TaskBrowserFixture {
@@ -251,6 +266,95 @@ struct TaskBrowserFixture {
   RTT::TaskContext task;
   TaskBrowserProbe browser;
 };
+
+struct TaskBrowserConnectionsFixture {
+  TaskBrowserConnectionsFixture()
+      : source("pair_source"), scalar_source("scalar_source"), sink("sink"),
+        pair("output"), scalar("output"), replacement("replacement"),
+        whole("whole"), input("input"), selected("selected"), unused("unused"),
+        output("result"), browser(&sink) {
+    loadRendererTypes();
+    sink.setActivity(new RTT::extras::SlaveActivity(0.01));
+    source.provides("telemetry")->provides("deep")->addPort(pair);
+    scalar_source.addPort(scalar);
+    scalar_source.addPort(replacement);
+    sink.addPort(whole);
+    auto service = sink.provides("io")->provides("deep");
+    service->addPort(input);
+    service->addPort(selected);
+    service->addPort(unused);
+    service->addPort(output);
+    BOOST_REQUIRE(pair.connectTo(&whole));
+    // Deliberately create y before x; the listing should follow destination order.
+    BOOST_REQUIRE(RTT::connectMembers(pair, "y", input, "y"));
+    BOOST_REQUIRE(RTT::connectMembers(scalar, "", input, "x"));
+    BOOST_REQUIRE(RTT::connectMembers(pair, "x", selected, ""));
+  }
+
+  ~TaskBrowserConnectionsFixture() {
+    if (sink.isRunning()) sink.stop();
+  }
+
+  RTT::TaskContext source, scalar_source, sink;
+  RTT::OutputPort<renderer_test::Point> pair;
+  RTT::OutputPort<double> scalar, replacement;
+  RTT::InputPort<renderer_test::Point> whole, input;
+  RTT::InputPort<double> selected, unused;
+  RTT::OutputPort<double> output;
+  TaskBrowserProbe browser;
+};
+
+BOOST_FIXTURE_TEST_CASE(taskbrowser_lists_whole_and_member_sources_without_consuming_input,
+                        TaskBrowserConnectionsFixture) {
+  pair.data() = renderer_test::Point{10.0, 20.0};
+  scalar.data() = 100.0;
+  RTT::internal::PortDataAccess::commit(pair);
+  RTT::internal::PortDataAccess::commit(scalar);
+
+  const auto root = browser.listing();
+  BOOST_TEST(root.find("whole <- pair_source.telemetry.deep.output") != std::string::npos);
+  BOOST_TEST(root.find("In(C)") != std::string::npos);
+
+  for (const bool serviceHelp : {false, true}) {
+    const auto listing = browser.listing("io.deep", serviceHelp);
+    BOOST_TEST_CONTEXT((serviceHelp ? "help" : "ls") << " io.deep produced:\n" << listing) {
+      const auto x = listing.find("input.x <- scalar_source.output");
+      const auto y = listing.find("input.y <- pair_source.telemetry.deep.output.y");
+      BOOST_REQUIRE(x != std::string::npos);
+      BOOST_REQUIRE(y != std::string::npos);
+      BOOST_TEST(x < y);
+      BOOST_TEST(listing.find("selected <- pair_source.telemetry.deep.output.x") != std::string::npos);
+      BOOST_TEST(listing.find("unused <-") == std::string::npos);
+      BOOST_TEST(listing.find("result <-") == std::string::npos);
+      BOOST_TEST(listing.find("In(U)") != std::string::npos);
+      BOOST_TEST(listing.find("Out(U)") != std::string::npos);
+    }
+  }
+
+  BOOST_TEST(input.status() == RTT::NoData);
+  BOOST_REQUIRE(sink.start());
+  sink.getActivity()->execute();
+  BOOST_TEST(input.status() == RTT::NewData);
+  BOOST_TEST(input.data().x == 100.0);
+  BOOST_TEST(input.data().y == 20.0);
+  BOOST_TEST(whole.data().x == 10.0);
+  BOOST_TEST(selected.data() == 10.0);
+}
+
+BOOST_FIXTURE_TEST_CASE(taskbrowser_updates_sources_after_disconnect_and_reconnect,
+                        TaskBrowserConnectionsFixture) {
+  BOOST_REQUIRE(scalar.disconnect(&input));
+  BOOST_REQUIRE(RTT::connectMembers(replacement, "", input, "x"));
+  BOOST_REQUIRE(pair.disconnect(&whole));
+
+  const auto service = browser.listing("io.deep");
+  BOOST_TEST(service.find("input.x <- scalar_source.replacement") != std::string::npos);
+  BOOST_TEST(service.find("input.x <- scalar_source.output") == std::string::npos);
+  BOOST_TEST(service.find("input.y <- pair_source.telemetry.deep.output.y") != std::string::npos);
+  const auto root = browser.listing();
+  BOOST_TEST(root.find("whole <-") == std::string::npos);
+  BOOST_TEST(root.find("In(U)") != std::string::npos);
+}
 
 BOOST_FIXTURE_TEST_CASE(taskbrowser_prints_the_exact_named_value,
                         TaskBrowserFixture) {

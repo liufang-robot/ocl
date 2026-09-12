@@ -131,6 +131,30 @@ namespace OCL
     using namespace RTT;
     using namespace RTT::detail;
     using namespace boost::placeholders;
+
+    namespace {
+        std::string selectedPortName(const std::string& port, const std::string& member)
+        {
+            if (member.empty()) return port;
+            return port + (member.front() == '[' ? "" : ".") + member;
+        }
+
+        void printInputSources(std::ostream& stream, const InputPortInterface& input)
+        {
+            if (!input.connected()) return;
+            const InputPortInterface::SourceConnections sources = input.getSourceConnections();
+            if (sources.empty()) {
+                stream << '\n' << "       " << input.getName() << " <- <source unavailable>";
+            }
+            for (const auto& source : sources) {
+                stream << '\n' << "       "
+                       << selectedPortName(input.getName(), source.destinationMember) << " <- "
+                       << (source.sourcePort.empty() ? "<source unavailable>"
+                           : selectedPortName(source.sourcePort, source.sourceMember));
+            }
+        }
+    }
+
 #ifdef USE_READLINE
     std::vector<std::string> TaskBrowser::candidates;
     std::vector<std::string> TaskBrowser::completes;
@@ -1575,6 +1599,7 @@ namespace OCL
                             DataSourceBase::shared_ptr dsb = iport->getDataSource();
                             dsb->evaluate();
                             sresult << " <= " << dsb;
+                            printInputSources(sresult, *iport);
                         }
                         OutputPortInterface* oport = dynamic_cast<OutputPortInterface*>(port);
                         if (oport) {
@@ -2208,6 +2233,7 @@ namespace OCL
                     DataSourceBase::shared_ptr dsb = iport->getDataSource();
                     dsb->evaluate();
                     sresult << " <= " << dsb;
+                    printInputSources(sresult, *iport);
                 }
                 OutputPortInterface* oport = dynamic_cast<OutputPortInterface*>(port);
                 if (oport) {
