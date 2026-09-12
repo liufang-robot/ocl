@@ -21,7 +21,7 @@ namespace OCL
      * the timeout event of this component.
      *
      */
-    class TimerComponent
+    class OCL_API TimerComponent
         : public RTT::TaskContext
     {
     protected:

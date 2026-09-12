@@ -11,6 +11,8 @@ namespace OCL
     using namespace std;
     using namespace RTT;
 
+    const unsigned TimerComponent::TimerCount;
+
     TimerComponent::TimerComponent( std::string name /*= "os::Timer" */ )
         : TaskContext( name, PreOperational ), port_timers(TimerCount), mtimeoutEvent("timeout"),
           mtimer( *this, name ),
