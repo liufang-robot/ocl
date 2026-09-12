@@ -177,7 +177,8 @@ namespace OCL
   void LuaComponent::updateHook()
   {
     os::MutexLock lock(m);
-    call_func(L, "updateHook", this, 0, 0);
+    if (!call_func(L, "updateHook", this, 0, 0))
+      this->error();
   }
 
   void LuaComponent::stopHook()

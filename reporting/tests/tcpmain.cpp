@@ -58,7 +58,7 @@ class TestTaskContext
             }
             pos--;
             if( pos == 0 ) { pos = 10; }
-            dwport.write( init );
+            dwport.data() =  init ;
         }
 
         virtual void stopHook () {

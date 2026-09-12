@@ -8,6 +8,9 @@
 #include <rtt/OutputPort.hpp>
 
 #include <rtt/RTT.hpp>
+#include <array>
+#include <atomic>
+#include <cstdint>
 #include <ocl/OCL.hpp>
 
 namespace OCL
@@ -25,23 +28,32 @@ namespace OCL
         /**
          * Helper class for catching the virtual timeout function of Timer.
          */
+        // Expiration counts are state, modulo 2^64. Consumers compute counter
+        // differences to recover multiplicity even when component cycles coalesce.
+        static const unsigned TimerCount = 32;
+        typedef std::uint64_t ExpirationCount;
         struct TimeoutCatcher : public os::Timer {
-            RTT::OutputPort<RTT::os::Timer::TimerId>& me;
-            std::vector<RTT::OutputPort<RTT::os::Timer::TimerId>* >& m_port_timers;
-            TimeoutCatcher(std::vector<RTT::OutputPort<RTT::os::Timer::TimerId>* >& port_timers, RTT::OutputPort<RTT::os::Timer::TimerId>&  op, const std::string& name) :
-                os::Timer(port_timers.size(), ORO_SCHED_RT, os::HighestPriority, name + ".Timer"),
-                me(op),
-		m_port_timers(port_timers)
-            {}
-            virtual void timeout(os::Timer::TimerId id) {
-                m_port_timers[id]->write(id);
-                me.write(id);
+            TimerComponent& owner;
+            std::array<std::atomic<ExpirationCount>, TimerCount> counts;
+            TimeoutCatcher(TimerComponent& component, const std::string& name)
+                : os::Timer(TimerCount, ORO_SCHED_RT, os::HighestPriority, name + ".Timer"), owner(component)
+            {
+                for (unsigned i = 0; i != TimerCount; ++i) counts[i].store(0);
+            }
+            ~TimeoutCatcher() override {
+                if (getThread()) getThread()->stop();
+            }
+            void timeout(os::Timer::TimerId id) override {
+                if (id < 0 || static_cast<unsigned>(id) >= TimerCount) return;
+                counts[id].fetch_add(1, std::memory_order_relaxed);
+                owner.trigger();
             }
         };
 
-        std::vector<OutputPort<RTT::os::Timer::TimerId>* > port_timers;
-        OutputPort<RTT::os::Timer::TimerId> mtimeoutEvent;
+        std::vector<OutputPort<ExpirationCount>* > port_timers;
+        OutputPort<ExpirationCount> mtimeoutEvent;
         TimeoutCatcher mtimer;
+        bool setMaxTimers(unsigned int count);
 
         /**
          * This hook will check if a Activity has been properly

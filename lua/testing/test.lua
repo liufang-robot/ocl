@@ -177,9 +177,9 @@ function test_dataflow_lua()
    TC:addPort(po)
    TC:addPort(pi)
    print("connecting ports... ", d:connectTwoPorts("lua", "po", "lua", "pi"))
-   po:write("hello_ports")
-   local res, val = pi:read()
-   return res == "NewData" and val == "hello_ports"
+   po:data("hello_ports")
+   local res, val = pi:status(), pi:data()
+   return res == "NoData" and val == ""
 end
 
 function test_lua_service()

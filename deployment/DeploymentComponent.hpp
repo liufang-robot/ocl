@@ -333,6 +333,13 @@ namespace OCL
          */
         bool createDataPortConnections(const bool skipUnconnected);
 
+        /** Declare a cyclic whole-value or selected-member connection. */
+        bool connectPort(const std::string& source, const std::string& destination);
+        bool connectMember(const std::string& source, const std::string& sourceMember,
+                           const std::string& destination, const std::string& destinationMember);
+        /** Prepare every peer's cyclic connections while stopped. */
+        bool finalizeConnections();
+
         using TaskContext::connectPorts;
         /**
          * Establish a data flow connection between two tasks. The direction

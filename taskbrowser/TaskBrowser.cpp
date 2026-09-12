@@ -1559,16 +1559,15 @@ namespace OCL
 
                         InputPortInterface* iport = dynamic_cast<InputPortInterface*>(port);
                         if (iport) {
-                            sresult << " <= ( use '"<< iport->getName() << ".read(sample)' to read a sample from this port)";
+                            DataSourceBase::shared_ptr dsb = iport->getDataSource();
+                            dsb->evaluate();
+                            sresult << " <= " << dsb;
                         }
                         OutputPortInterface* oport = dynamic_cast<OutputPortInterface*>(port);
                         if (oport) {
-                            if ( oport->keepsLastWrittenValue()) {
-                                DataSourceBase::shared_ptr dsb = oport->getDataSource();
-                                dsb->evaluate(); // read last written value.
-                                sresult << " => " << dsb;
-                            } else
-                                sresult << " => (keepsLastWrittenValue() == false. Enable it for this port in order to see it in the TaskBrowser.)";
+                            DataSourceBase::shared_ptr dsb = oport->getDataSource();
+                            dsb->evaluate(); // Observe the committed output snapshot.
+                            sresult << " => " << dsb;
                         }
                     }
                 } else {
@@ -2190,49 +2189,17 @@ namespace OCL
 
                 InputPortInterface* iport = dynamic_cast<InputPortInterface*>(port);
                 if (iport) {
-                    sresult << " <= ( use '"<< iport->getName() << ".read(sample)' to read a sample from this port)";
+                    DataSourceBase::shared_ptr dsb = iport->getDataSource();
+                    dsb->evaluate();
+                    sresult << " <= " << dsb;
                 }
                 OutputPortInterface* oport = dynamic_cast<OutputPortInterface*>(port);
                 if (oport) {
-                    if ( oport->keepsLastWrittenValue()) {
-                    	DataSourceBase::shared_ptr dsb = oport->getDataSource();
-                    	dsb->evaluate(); // read last written value.
-                        sresult << " => " << dsb;
-                    } else
-                        sresult << " => (keepsLastWrittenValue() == false. Enable it for this port in order to see it in the TaskBrowser.)";
+                    DataSourceBase::shared_ptr dsb = oport->getDataSource();
+                    dsb->evaluate(); // Observe the committed output snapshot.
+                    sresult << " => " << dsb;
                 }
-#if 0
-				// only show if we're connected to it
-				if (peer == taskcontext && peer->provides() == taskobject) {
-					// Lookup if we have an input with that name and
-					// consume the last sample this port produced.
-					InputPortInterface* iport = dynamic_cast<InputPortInterface*>(ports()->getPort(port->getName()));
-					if (iport) {
-						// consume sample
-						iport->getDataSource()->evaluate();
-						// display
-						if ( peer == this)
-							sresult << " <= " << DataSourceBase::shared_ptr( iport->getDataSource());
-						else
-							sresult << " => " << DataSourceBase::shared_ptr( iport->getDataSource());
-					}
-					OutputPortInterface* oport = dynamic_cast<OutputPortInterface*>(ports()->getPort(port->getName()));
-					if (oport) {
-						// display last written value:
-						DataSourceBase::shared_ptr ds = oport->getDataSource();
-						if (ds) {
-							if ( peer == this)
-								sresult << " => " << ds;
-							else
-								sresult << " <= " << ds << " (sent from TaskBrowser)";
-						} else {
-							sresult << "(no last written value kept)";
-						}
-					}
-				} else {
-					sresult << "(TaskBrowser not connected to this port)";
-				}
-#endif
+
 				// Port description (see Service)
 //                     if ( peer->provides(*it) )
 //                         sresult << " ( "<< taskobject->provides(*it)->getDescription() << " ) ";

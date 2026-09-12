@@ -31,10 +31,10 @@ public:
     TestTaskContext(std::string name)
         : TaskContext(name),
           hello("Hello", "The hello thing", "World"),
-          cwport("cw_port", 'a'),
-          swport("sw_port", 1),
-          iwport("iw_port", 0),
-          fwport("fw_port", 0.0),
+          cwport("cw_port"),
+          swport("sw_port"),
+          iwport("iw_port"),
+          fwport("fw_port"),
           dwport("dw_port"),
           crport("cr_port"),
           srport("sr_port"),
@@ -55,16 +55,16 @@ public:
         this->ports()->addPort( drport );
         // write initial value.
         std::vector<double> init(10, 5.4528);
-        dwport.write( init );
+        dwport.data() =  init ;
     }
 
     void updateHook() {
-    	cwport.write(i);
-    	swport.write(i);
-    	iwport.write(i);
-    	fwport.write(i);
-    	dwport.write( std::vector<double>(10,i) );
-    	++i;
+        cwport.data() = i;
+        swport.data() = i;
+        iwport.data() = i;
+        fwport.data() = i;
+        dwport.data() =  std::vector<double>(10,i) ;
+        ++i;
     }
 };
 

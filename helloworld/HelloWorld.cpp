@@ -71,7 +71,7 @@ namespace OCL
          */
         RTT::OutputPort<std::string> outport;
         /**
-         * This RTT::InputPort buffers incoming data.
+         * This RTT::InputPort exposes the latest cyclic input image.
          */
         RTT::InputPort<std::string> bufferport;
         /** @} */
@@ -103,12 +103,11 @@ namespace OCL
         		flag = false;
         	}
 
-            outport.write("Hello World!");
+            outport.data() = "Hello World!";
 
-            std::string sample;
-            while(bufferport.read(sample) == NewData) {
+            if (bufferport.status() == NewData) {
                 Logger::log().logf(Logger::Debug, "HelloWorld::updateHook",
-                                   "Received %s", sample.c_str());
+                                   "Received %s", bufferport.data().c_str());
             }
         }
     public:
@@ -123,9 +122,9 @@ namespace OCL
               attribute("Hello Attribute"),
               constant("Hello Constant"),
               // Name, initial value
-              outport("the_results",true),
+              outport("the_results"),
               // Name, policy
-              bufferport("the_buffer_port",ConnPolicy::buffer(13,ConnPolicy::LOCK_FREE,true) )
+              bufferport("the_buffer_port")
         {
             // New activity with period 0.1s and priority 0.
             this->setActivity( new Activity(0, 0.1) );

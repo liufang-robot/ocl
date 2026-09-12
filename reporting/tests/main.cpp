@@ -41,7 +41,7 @@ public:
 
     void updateHook() {
         std::vector<double> init(10, input.get() );
-        dwport.write( init );
+        dwport.data() =  init ;
         input.set( input.get() + 1 );
         if (input.get() > 100 )
             input.set( 0 );
@@ -73,7 +73,7 @@ public:
     }
 
     void updateHook() {
-        dwport.write( input.get() );
+        dwport.data() =  input.get() ;
         input.set( input.get() + 1 );
         if (input.get() > 100 )
             input.set( 0 );

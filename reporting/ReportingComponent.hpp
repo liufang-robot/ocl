@@ -242,7 +242,6 @@ namespace OCL
         RTT::Property<bool>          insnapshot;
         RTT::Property<bool>          synchronize_with_logging;
         RTT::Property<PropertyBag>   report_data;
-        RTT::ConnPolicy              report_policy;
         bool                         onlyNewData;
 
         RTT::os::TimeService::ticks starttime;

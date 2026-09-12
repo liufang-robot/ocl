@@ -28,7 +28,7 @@ public:
         this->ports()->addPort( dwport );
 
         std::vector<double> init(10, 1.0);
-        dwport.write(init);
+        dwport.data() = init;
     }
 };
 
@@ -51,7 +51,7 @@ public:
         this->ports()->addPort( dwport );
 
         // write initial value.
-        dwport.write( 0.0 );
+        dwport.data() =  0.0 ;
     }
 };
 

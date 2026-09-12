@@ -11,9 +11,17 @@ module 'rtt.OutputPort'
 -- @param desc (optional) description of port
 function new(type, name, desc)
 
---- Write to an output port
--- @param value to be written
-function write()
+--- Copy or modify the output process image without publishing it.
+-- Available while stopped or in the owning component's execution context.
+-- Publication happens automatically after a successful component updateHook.
+-- @param value (optional) Exactly typed value to assign to the image.
+-- @return Detached image copy when no value is supplied.
+function data(value)
+
+--- Observe the last committed output snapshot without consuming a sample.
+-- May be called by external observers while the component is running.
+-- @return Committed snapshot, or a default value before the first commit.
+function snapshot()
 
 --- Return information about a port.
 -- The information is stored in a table with the fields:<br><br>

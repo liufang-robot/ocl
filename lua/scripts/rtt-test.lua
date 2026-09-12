@@ -164,8 +164,8 @@ function test_ports()
    for i=1,10 do
       local mes = "data_" .. tostring(i)
       print("writing... " .. mes)
-      op:write(var.new("String", mes))
-      ip:read(res)
+      op:data(var.new("String", mes))
+      res:assign(ip:data())
       print("reading... " .. tostring(res))
    end
 end

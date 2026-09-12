@@ -159,6 +159,16 @@ namespace OCL
         this->addOperation("waitForSignal", &DeploymentComponent::waitForSignal, this, ClientThread).doc("This operation waits for the signal of the argument and then returns. This allows you to wait in a script for any signal except SIGKILL and SIGSTOP.").arg("signal number","The signal number to wait for.");
 
 
+        this->addOperation("connectPort", &DeploymentComponent::connectPort, this, ClientThread)
+            .doc("Declare an exactly typed whole-port cyclic connection.")
+            .arg("Source", "Service-qualified output port.").arg("Destination", "Service-qualified input port.");
+        this->addOperation("connectMember", &DeploymentComponent::connectMember, this, ClientThread)
+            .doc("Declare a typed cyclic member mapping. Empty member paths select whole values.")
+            .arg("Source", "Service-qualified output port.").arg("SourceMember", "Member or fixed-array path.")
+            .arg("Destination", "Service-qualified input port.").arg("DestinationMember", "Member or fixed-array path.");
+        this->addOperation("finalizeConnections", &DeploymentComponent::finalizeConnections, this, ClientThread)
+            .doc("Validate and prepare cyclic connections of all peers before activation.");
+
         // Work around compiler ambiguity:
         typedef bool(DeploymentComponent::*DCFun)(const std::string&, const std::string&);
         DCFun cp = &DeploymentComponent::connectPeers;
@@ -592,7 +602,7 @@ namespace OCL
     	boost::split(strs, names, boost::is_any_of("."));
 
       // strs could be empty because of a bug in Boost 1.44 (see https://svn.boost.org/trac/boost/ticket/4751)
-      if (strs.empty()) return 0;
+      if (strs.size() < 2 || std::find(strs.begin(), strs.end(), std::string()) != strs.end()) return 0;
 
     	string component = strs.front();
         RTT::TaskContext *tc = (((component == this->getName()) || (component == "this")) ? this : getPeer(component));
@@ -629,6 +639,37 @@ namespace OCL
     	}
 
     	return ret;
+    }
+
+    bool DeploymentComponent::connectPort(const std::string& source, const std::string& destination)
+    {
+        return connectMember(source, "", destination, "");
+    }
+
+    bool DeploymentComponent::connectMember(const std::string& source, const std::string& sourceMember,
+                                             const std::string& destination, const std::string& destinationMember)
+    {
+        base::OutputPortInterface* output = dynamic_cast<base::OutputPortInterface*>(stringToPort(source));
+        base::InputPortInterface* input = dynamic_cast<base::InputPortInterface*>(stringToPort(destination));
+        if (!output || !input) {
+            Logger::log().logf(Logger::Error, "DeploymentComponent::connectMember",
+                              "Expected output '%s' and input '%s'", source.c_str(), destination.c_str());
+            return false;
+        }
+        return RTT::connectMembers(*output, sourceMember, *input, destinationMember);
+    }
+
+    bool DeploymentComponent::finalizeConnections()
+    {
+        const PeerList peers = getPeerList();
+        // Check all states first, so an active peer cannot cause partial preparation.
+        if (isRunning()) return false;
+        for (PeerList::const_iterator it = peers.begin(); it != peers.end(); ++it)
+            if (getPeer(*it)->isRunning()) return false;
+        bool result = TaskContext::finalizeConnections();
+        for (PeerList::const_iterator it = peers.begin(); it != peers.end(); ++it)
+            result = getPeer(*it)->finalizeConnections() && result;
+        return result;
     }
 
     bool DeploymentComponent::connectPorts(const std::string& one, const std::string& other)
