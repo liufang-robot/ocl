@@ -50,6 +50,9 @@ using namespace RTT::base;
 using namespace RTT::internal;
 
 static TaskContext* __getTC(lua_State*);
+// Native lifecycle hooks may execute in the thread invoking start()/stop().
+// Scope permission to the exact component and native hook call on this thread.
+static thread_local TaskContext* image_hook_owner = NULL;
 
 #define DEBUG
 
@@ -1331,7 +1334,7 @@ static void requireImageAccess(lua_State* L, PortInterface* port)
     TaskContext* owner = port->getInterface() ? port->getInterface()->getOwner() : NULL;
     if (owner && (owner->base::TaskCore::isRunning() ||
                   owner->base::TaskCore::getTargetState() >= RTT::base::TaskCore::Running) &&
-        (owner != __getTC(L) || !owner->engine()->isSelf()))
+        (owner != __getTC(L) || (!owner->engine()->isSelf() && image_hook_owner != owner)))
         luaL_error(L, "Port.data: running process images are accessible only in their owner's execution context");
 }
 
@@ -3178,10 +3181,11 @@ int set_context_tc(TaskContext *tc, lua_State *L)
 /* call a zero arity function with a boolean return value
  * used to call various hooks */
 bool call_func(lua_State *L, const char *fname, TaskContext *tc,
-	       int require_function, int require_result)
+	       int require_function, int require_result, bool owner_hook)
 {
 	bool ret = true;
 	int num_res = (require_result != 0) ? 1 : 0;
+    int call_status;
 	lua_getglobal(L, fname);
 
 	if(lua_isnil(L, -1)) {
@@ -3192,7 +3196,17 @@ bool call_func(lua_State *L, const char *fname, TaskContext *tc,
 			goto out;
 	}
 
-	if (lua_pcall(L, 0, num_res, 0) != 0) {
+    {
+        struct HookOwnerScope {
+            TaskContext* previous;
+            explicit HookOwnerScope(TaskContext* owner) : previous(image_hook_owner) {
+                image_hook_owner = owner;
+            }
+            ~HookOwnerScope() { image_hook_owner = previous; }
+        } scope(owner_hook ? tc : image_hook_owner);
+        call_status = lua_pcall(L, 0, num_res, 0);
+    }
+	if (call_status != 0) {
 		const char* lua_error = lua_tostring(L, -1);
 		Logger::log().logf(Logger::Error, "LuaComponent",
 		                   "LuaComponent '%s': error calling function %s: %s",

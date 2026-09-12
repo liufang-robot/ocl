@@ -159,44 +159,44 @@ namespace OCL
 
     if(!lua_file.empty())
       exec_file(lua_file);
-    return call_func(L, "configureHook", this, 0, 1);
+    return call_func(L, "configureHook", this, 0, 1, true);
   }
 
   bool LuaComponent::activateHook()
   {
     os::MutexLock lock(m);
-    return call_func(L, "activateHook", this, 0, 1);
+    return call_func(L, "activateHook", this, 0, 1, true);
   }
 
   bool LuaComponent::startHook()
   {
     os::MutexLock lock(m);
-    return call_func(L, "startHook", this, 0, 1);
+    return call_func(L, "startHook", this, 0, 1, true);
   }
 
   void LuaComponent::updateHook()
   {
     os::MutexLock lock(m);
-    if (!call_func(L, "updateHook", this, 0, 0))
+    if (!call_func(L, "updateHook", this, 0, 0, true))
       this->error();
   }
 
   void LuaComponent::stopHook()
   {
     os::MutexLock lock(m);
-    call_func(L, "stopHook", this, 0, 0);
+    call_func(L, "stopHook", this, 0, 0, true);
   }
 
   void LuaComponent::cleanupHook()
   {
     os::MutexLock lock(m);
-    call_func(L, "cleanupHook", this, 0, 0);
+    call_func(L, "cleanupHook", this, 0, 0, true);
   }
 
   void LuaComponent::errorHook()
   {
     os::MutexLock lock(m);
-    call_func(L, "errorHook", this, 0, 0);
+    call_func(L, "errorHook", this, 0, 0, true);
   }
 
   LuaStateHandle LuaComponent::getLuaState()

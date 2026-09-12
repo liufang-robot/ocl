@@ -186,25 +186,16 @@ namespace OCL
         /** @} */
 
     protected:
-        /**
-         * tuple that describes each sample. Uses get<N>() to read it:
-         * @0 The qualified name of the data (componentname.portname)
-         * @1 The data source of the data. Always returns the last value.
-         * @2 A copy command to copy from this data source to another one
-         * @3 The target data source for the copy operation
-         * @4 The type of the data, "Data" (props and attrs) or "Port".
-         * @5 'newdata': The new data flag. Flags if the DataSource contains new data.
-         * @6 'tracked': True if this source may lead to additional data. If false, the source
-         * in itself will not cause to a re-scan. Used in copydata() to allow ports
-         * to be rescanned, while props and attrs never cause this (they always have newdata,
-         * but this is ignored).
-         */
+        /** Each report retains its committed observer and a separate assignable
+         * value whose member references remain bound while reports are emitted. */
         typedef boost::tuple<std::string,
                              RTT::base::DataSourceBase::shared_ptr,
-                             std::string,RTT::base::PropertyBase*,RTT::base::InputPortInterface*,bool,bool> DTupple;
+                             std::string,RTT::base::PropertyBase*,RTT::base::InputPortInterface*,bool,bool,
+                             RTT::base::DataSourceBase::shared_ptr> DTupple;
 
-        //! Use these to index DTupple objects.
-        typedef enum { T_QualName = 0, T_PortDS, T_DataType, T_Property, T_Port, T_NewData, T_Tracked } T_Types;
+        typedef enum { T_QualName = 0, T_PortDS, T_DataType, T_Property, T_Port,
+                       T_NewData, T_Tracked, T_Observer } T_Types;
+        bool reportChangeAllowed() const;
         /**
          * Stores the 'datasource' of all reported items as properties.
          */

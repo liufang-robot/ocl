@@ -19,6 +19,22 @@ void require(bool value, const char* message) {
 }
 int ORO_main(int, char**) {
     try {
+        {
+            OCL::LuaComponent lifecycle("lifecycle");
+            RTT::OutputPort<int> initial("initial"); lifecycle.addPort(initial);
+            require(lifecycle.exec_str(R"(
+                initial = rtt.getTC():getPort('initial')
+                function configureHook() return true end
+                function startHook() initial:data(7); return true end
+                function updateHook() end
+            )"), "install lifecycle startup hook");
+            require(lifecycle.configure() && lifecycle.start(), "normal activity lifecycle caller may initialize its own image");
+            require(lifecycle.exec_str("assert(not pcall(function() initial:data(99) end))"),
+                    "lifecycle access scope must end before external execution");
+            lifecycle.stop();
+            require(initial.data() == 7, "startHook retains its own image initialization");
+            lifecycle.ports()->removePort("initial");
+        }
         OCL::LuaComponent component("lua");
         component.setActivity(new RTT::extras::SlaveActivity(0.01));
         UnsupportedPort unsupported;

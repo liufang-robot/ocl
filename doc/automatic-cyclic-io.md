@@ -22,7 +22,8 @@ and finalization must complete while all involved components are stopped.
 Lua provides `input:data()`, `input:status()`, `output:data(value)`, and
 `output:data()`. Image getters return detached copies; input copies cannot modify
 the actual input image. A running component's images are accessible only in its
-own execution context. `output:snapshot()` safely observes a committed output
+own execution context, including native lifecycle hooks such as `startHook`.
+`output:snapshot()` safely observes a committed output
 from another context. Image assignment never publishes immediately. The manual
 `read` and `write` methods have been removed.
 
@@ -31,7 +32,9 @@ snapshots independently of component input subscriptions. Configure a periodic
 reporter activity or request its `snapshot()` operation explicitly. Each report
 samples each output once; samples between reports may coalesce. `ReportOnlyNewData`
 uses independent observer freshness. The former queue-oriented `ReportPolicy`
-property has been removed.
+property has been removed. Structured fields are decomposed from reporter-owned
+copies, so reporting cannot modify the source snapshot. Register or remove report
+sources and marshallers while the reporter is stopped.
 
 TimerComponent's `timer_0` through `timer_31` ports now expose `UInt64` cumulative
 expiration counts. Its `timeout` port holds their sum. Timer callbacks increment
