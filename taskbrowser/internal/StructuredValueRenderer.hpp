@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ocl/ocl-config.h"
+
 #include <rtt/base/DataSourceBase.hpp>
 
 #include <cstddef>
@@ -19,6 +21,7 @@ struct StructuredValueRenderOptions {
   std::size_t max_result_bytes{4096};
   std::size_t indentation{2};
   bool hexadecimal{false};
+  bool sequence_indices{false};
 };
 
 enum class StructuredValueRenderStatus {
@@ -31,11 +34,11 @@ struct StructuredValueRenderResult {
   std::string text;
 };
 
-StructuredValueRenderResult renderStructuredValue(
+OCL_API StructuredValueRenderResult renderStructuredValue(
     RTT::base::DataSourceBase::shared_ptr source,
     const StructuredValueRenderOptions &options = {});
 
-std::string renderStructuredSnapshotForTest(
+OCL_API std::string renderStructuredSnapshotForTest(
     RTT::base::DataSourceBase::shared_ptr snapshot,
     const StructuredValueRenderOptions &options = {});
 

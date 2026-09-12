@@ -105,6 +105,7 @@ namespace OCL
         std::string storedname; //! last program listed to screen
         int storedline; //!last program line number listed to screen
         bool usehex;
+        bool sequence_indices;
 
         std::deque<RTT::TaskContext*> taskHistory;
 

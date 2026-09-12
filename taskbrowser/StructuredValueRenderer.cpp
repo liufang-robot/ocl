@@ -19,6 +19,7 @@ struct RenderNode {
   enum class Kind { scalar, structure, sequence, unavailable };
   Kind kind{Kind::scalar};
   std::string scalar;
+  std::string type_name;
   std::vector<std::pair<std::string, RenderNode>> children;
   std::size_t omitted{0};
   bool collapsed{false};
@@ -148,6 +149,7 @@ RenderNode captureNode(const DataSourcePtr &source, std::size_t structural_depth
 
     RenderNode node;
     node.kind = RenderNode::Kind::structure;
+    node.type_name = source->getTypeName();
     if (structural_depth > options.max_structural_depth) {
       node.collapsed = true;
       return node;
@@ -175,7 +177,20 @@ std::string omissionText(const RenderNode &node) {
          (node.kind == RenderNode::Kind::sequence ? " items omitted" : " members omitted");
 }
 
-std::string renderCompact(const RenderNode &node) {
+std::string childPrefix(const RenderNode &parent,
+                        const std::pair<std::string, RenderNode> &child,
+                        const OCL::detail::StructuredValueRenderOptions &options) {
+  if (parent.kind != RenderNode::Kind::sequence) return child.first + ": ";
+  const std::string index = options.sequence_indices ? "[" + child.first + "]: " : "";
+  return index + child.second.type_name;
+}
+
+std::string childSeparator(bool multiline, bool sequence) {
+  return multiline ? (sequence ? ",\n" : "\n") : ", ";
+}
+
+std::string renderCompact(const RenderNode &node,
+                          const OCL::detail::StructuredValueRenderOptions &options) {
   if (node.kind == RenderNode::Kind::scalar) return node.scalar;
   if (node.kind == RenderNode::Kind::unavailable) return "<unavailable>";
   if (node.collapsed) return node.kind == RenderNode::Kind::sequence ? "[...]" : "{...}";
@@ -184,9 +199,8 @@ std::string renderCompact(const RenderNode &node) {
   std::string output(sequence ? "[" : "{");
   for (std::size_t index = 0; index < node.children.size(); ++index) {
     if (index != 0U) output += ", ";
-    if (sequence) output += "[" + node.children[index].first + "]: ";
-    else output += node.children[index].first + ": ";
-    output += renderCompact(node.children[index].second);
+    output += childPrefix(node, node.children[index], options);
+    output += renderCompact(node.children[index].second, options);
   }
   if (node.omitted != 0U) {
     if (!node.children.empty()) output += ", ";
@@ -201,27 +215,46 @@ std::string indent(std::size_t depth, std::size_t indentation) {
 }
 
 std::string renderMultiline(const RenderNode &node, std::size_t depth,
-                            std::size_t indentation) {
+                            const OCL::detail::StructuredValueRenderOptions &options);
+
+std::string renderChild(const RenderNode &parent,
+                        const std::pair<std::string, RenderNode> &child,
+                        bool multiline, std::size_t depth,
+                        const OCL::detail::StructuredValueRenderOptions &options) {
+  const std::string compact = renderCompact(child.second, options);
+  // Keep small custom elements and nested arrays on one line in a wrapped array.
+  if (!multiline ||
+      (parent.kind == RenderNode::Kind::sequence &&
+       depth * options.indentation + childPrefix(parent, child, options).size() +
+               compact.size() + 1U <= options.compact_width)) {
+    return compact;
+  }
+  return renderMultiline(child.second, depth, options);
+}
+
+std::string renderMultiline(const RenderNode &node, std::size_t depth,
+                            const OCL::detail::StructuredValueRenderOptions &options) {
   if (node.kind == RenderNode::Kind::scalar) return node.scalar;
   if (node.kind == RenderNode::Kind::unavailable) return "<unavailable>";
   if (node.collapsed) return node.kind == RenderNode::Kind::sequence ? "[...]" : "{...}";
+  if (node.children.empty() && node.omitted == 0U) return renderCompact(node, options);
 
   const bool sequence = node.kind == RenderNode::Kind::sequence;
   std::string output(sequence ? "[\n" : "{\n");
   bool first = true;
   for (std::size_t child_index = 0; child_index < node.children.size(); ++child_index) {
     const auto &child = node.children[child_index];
-    if (!first) output += "\n";
-    output += indent(depth + 1U, indentation);
-    output += sequence ? "[" + child.first + "]: " : child.first + ": ";
-    output += renderMultiline(child.second, depth + 1U, indentation);
+    if (!first) output += childSeparator(true, sequence);
+    output += indent(depth + 1U, options.indentation);
+    output += childPrefix(node, child, options);
+    output += renderChild(node, child, true, depth + 1U, options);
     first = false;
   }
   if (node.omitted != 0U) {
-    if (!first) output += "\n";
-    output += indent(depth + 1U, indentation) + omissionText(node);
+    if (!first) output += childSeparator(true, sequence);
+    output += indent(depth + 1U, options.indentation) + omissionText(node);
   }
-  output += "\n" + indent(depth, indentation) + (sequence ? "]" : "}");
+  output += "\n" + indent(depth, options.indentation) + (sequence ? "]" : "}");
   return output;
 }
 
@@ -246,6 +279,7 @@ std::string renderBounded(const RenderNode &node, bool multiline, std::size_t de
   if (node.kind == RenderNode::Kind::scalar) return truncateScalar(node.scalar, budget);
   if (node.kind == RenderNode::Kind::unavailable) return "<unavailable>";
   if (node.collapsed) return node.kind == RenderNode::Kind::sequence ? "[...]" : "{...}";
+  if (node.children.empty() && node.omitted == 0U) return renderCompact(node, options);
 
   const bool sequence = node.kind == RenderNode::Kind::sequence;
   const std::string closing = multiline
@@ -253,7 +287,7 @@ std::string renderBounded(const RenderNode &node, bool multiline, std::size_t de
       : (sequence ? "]" : "}");
   std::string output = multiline ? (sequence ? "[\n" : "{\n") : (sequence ? "[" : "{");
   if (multiline && (!node.children.empty() || node.omitted != 0U) &&
-      renderMultiline(node, depth, options.indentation).size() > budget) {
+      renderMultiline(node, depth, options).size() > budget) {
     const std::string multiline_marker =
         output + indent(depth + 1U, options.indentation) +
         "... output omitted" + closing;
@@ -268,17 +302,14 @@ std::string renderBounded(const RenderNode &node, bool multiline, std::size_t de
 
   for (std::size_t child_index = 0; child_index < node.children.size(); ++child_index) {
     const auto &child = node.children[child_index];
-    const std::string separator = first ? "" : (multiline ? "\n" : ", ");
-    const std::string prefix = multiline
-        ? indent(depth + 1U, options.indentation) +
-              (sequence ? "[" + child.first + "]: " : child.first + ": ")
-        : (sequence ? "[" + child.first + "]: " : child.first + ": ");
-    const std::string complete = multiline
-        ? renderMultiline(child.second, depth + 1U, options.indentation)
-        : renderCompact(child.second);
+    const std::string separator = first ? "" : childSeparator(multiline, sequence);
+    const std::string prefix =
+        (multiline ? indent(depth + 1U, options.indentation) : "") +
+        childPrefix(node, child, options);
+    const std::string complete = renderChild(node, child, multiline, depth + 1U, options);
     const bool needs_future_omission =
         child_index + 1U < node.children.size() || node.omitted != 0U;
-    const std::string future_separator = multiline ? "\n" : ", ";
+    const std::string future_separator = childSeparator(multiline, sequence);
     const std::string future_prefix = multiline ? indent(depth + 1U, options.indentation) : "";
     const std::size_t future_reserve = needs_future_omission
         ? future_separator.size() + future_prefix.size() +
@@ -319,7 +350,7 @@ std::string renderBounded(const RenderNode &node, bool multiline, std::size_t de
   }
 
   if (node.omitted != 0U) {
-    const std::string separator = first ? "" : (multiline ? "\n" : ", ");
+    const std::string separator = first ? "" : childSeparator(multiline, sequence);
     const std::string marker = omissionText(node);
     const std::string marker_prefix = multiline ? indent(depth + 1U, options.indentation) : "";
     if (output.size() + separator.size() + marker_prefix.size() + marker.size() + closing.size() <= budget) {
@@ -337,7 +368,7 @@ std::string renderBounded(const RenderNode &node, bool multiline, std::size_t de
 std::string renderSnapshot(const DataSourcePtr &snapshot,
                            const OCL::detail::StructuredValueRenderOptions &options) {
   const RenderNode node = captureNode(snapshot, 1U, options);
-  const std::string compact = renderCompact(node);
+  const std::string compact = renderCompact(node, options);
   const bool multiline = compact.size() + 3U > options.compact_width;
   const std::size_t budget = options.max_result_bytes > 3U ? options.max_result_bytes - 3U : 0U;
   return renderBounded(node, multiline, 0U, options, budget);

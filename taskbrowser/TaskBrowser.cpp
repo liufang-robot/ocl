@@ -404,6 +404,8 @@ namespace OCL
             tbcoms.push_back(".dark");
             tbcoms.push_back(".hex");
             tbcoms.push_back(".nohex");
+            tbcoms.push_back(".indices");
+            tbcoms.push_back(".noindices");
             tbcoms.push_back(".nocolors");
             tbcoms.push_back(".connect");
             tbcoms.push_back(".record");
@@ -765,6 +767,7 @@ namespace OCL
           line_read(0),
           lastc(0), storedname(""), storedline(-1),
           usehex(false),
+          sequence_indices(false),
           histfile(0),
           macrorecording(false)
     {
@@ -1407,6 +1410,16 @@ namespace OCL
             cout << "Turning off hex notation for output." <<endl;
             return;
         }
+        if ( instr == "indices") {
+            sequence_indices = true;
+            cout << "Showing array indices (use .noindices to revert)." <<endl;
+            return;
+        }
+        if ( instr == "noindices") {
+            sequence_indices = false;
+            cout << "Hiding array indices." <<endl;
+            return;
+        }
         if ( instr == "provide") {
             while ( ss ) {
                 cout << "Trying to locate service '" << arg << "'..."<<endl;
@@ -1804,6 +1817,7 @@ namespace OCL
 
         OCL::detail::StructuredValueRenderOptions options;
         options.hexadecimal = usehex;
+        options.sequence_indices = sequence_indices;
         const OCL::detail::StructuredValueRenderResult result =
             OCL::detail::renderStructuredValue(ds, options);
         if (result.status == OCL::detail::StructuredValueRenderStatus::evaluation_failed) {
@@ -1947,6 +1961,8 @@ namespace OCL
         cout <<titlecol("Output Formatting")<<nl;
         cout << "  Use the commands "<<comcol(".hex") << " or " << comcol(".nohex") << " to turn hexadecimal "<<nl;
         cout << "  notation of integers on or off."<<nl;
+        cout << "  Arrays use [value, ...]; custom elements retain their type and field names."<<nl;
+        cout << "  Use "<<comcol(".indices")<< " to show array indices, or "<<comcol(".noindices")<< " to hide them."<<nl;
 
         cout <<titlecol("Macro Recording / RTT::Command line history")<<nl;
         cout << "  You can browse the commandline history by using the up-arrow key or press "<<comcol("Ctrl r")<<nl;

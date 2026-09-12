@@ -149,9 +149,11 @@ void loadRendererTypes() {
   if (types->type("/test/taskbrowser/Point") == nullptr) {
     BOOST_REQUIRE(types->addType(new RTT::types::StructTypeInfo<renderer_test::Point, true>("/test/taskbrowser/Point")));
     BOOST_REQUIRE(types->addType(new RTT::types::SequenceTypeInfo<std::vector<renderer_test::Point>>("/test/taskbrowser/PointArray")));
+    BOOST_REQUIRE(types->addType(new RTT::types::SequenceTypeInfo<std::vector<std::vector<std::int32_t>>>("/test/taskbrowser/Int32Matrix")));
     BOOST_REQUIRE(types->addType(new RTT::types::StructTypeInfo<renderer_test::Envelope, true>("/test/taskbrowser/Envelope")));
     BOOST_REQUIRE(types->addType(new RTT::types::TemplateTypeInfo<renderer_test::Opaque, true>("/test/taskbrowser/Opaque")));
     BOOST_REQUIRE(types->addType(new RTT::types::StructTypeInfo<renderer_test::Empty, false>("/test/taskbrowser/Empty")));
+    BOOST_REQUIRE(types->addType(new RTT::types::SequenceTypeInfo<std::vector<renderer_test::Empty>>("/test/taskbrowser/EmptyArray")));
     BOOST_REQUIRE(types->addType(new RTT::types::StructTypeInfo<renderer_test::TextValue, false>("/test/taskbrowser/TextValue")));
     BOOST_REQUIRE(types->addType(new RTT::types::StructTypeInfo<renderer_test::SizeCapacityValue, false>("/test/taskbrowser/SizeCapacityValue")));
     BOOST_REQUIRE(types->addType(new RTT::types::StructTypeInfo<renderer_test::Level4, false>("/test/taskbrowser/Level4")));
@@ -265,6 +267,21 @@ BOOST_FIXTURE_TEST_CASE(taskbrowser_reads_a_structured_root_once,
   BOOST_TEST(browser.render(source) ==
              " = {point: {x: 3.0, y: 4.0}, quality: 5}");
   BOOST_TEST(source->evaluationCount() == 1U);
+}
+
+BOOST_FIXTURE_TEST_CASE(taskbrowser_uses_compact_arrays_and_can_show_indices,
+                        TaskBrowserFixture) {
+  const auto integers = valueSource(std::vector<std::int32_t>{11, 24});
+  BOOST_TEST(browser.render(valueSource(std::vector<double>{-43.5, 323.34})) ==
+             " = [-43.5, 323.34]");
+  BOOST_TEST(browser.render(integers) == " = [11, 24]");
+
+  std::string action = "indices";
+  browser.browserAction(action);
+  BOOST_TEST(browser.render(integers) == " = [[0]: 11, [1]: 24]");
+  action = "noindices";
+  browser.browserAction(action);
+  BOOST_TEST(browser.render(integers) == " = [11, 24]");
 }
 
 BOOST_FIXTURE_TEST_CASE(taskbrowser_reports_a_failed_root_snapshot,
@@ -395,15 +412,16 @@ BOOST_AUTO_TEST_CASE(previews_zero_one_three_and_four_sequence_items) {
 
   BOOST_TEST(OCL::detail::renderStructuredValue(valueSource(PointArray{})).text == "[]");
   BOOST_TEST(OCL::detail::renderStructuredValue(valueSource(PointArray{{1.0, 2.0}})).text ==
-             "[[0]: {x: 1.0, y: 2.0}]");
+             "[/test/taskbrowser/Point{x: 1.0, y: 2.0}]");
   BOOST_TEST(OCL::detail::renderStructuredValue(valueSource(
                  PointArray{{1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0}})).text ==
-             "[[0]: {x: 1.0, y: 2.0}, [1]: {x: 3.0, y: 4.0}, "
-             "[2]: {x: 5.0, y: 6.0}]");
+             "[\n  /test/taskbrowser/Point{x: 1.0, y: 2.0},\n"
+             "  /test/taskbrowser/Point{x: 3.0, y: 4.0},\n"
+             "  /test/taskbrowser/Point{x: 5.0, y: 6.0}\n]");
 
   const auto four = OCL::detail::renderStructuredValue(valueSource(PointArray{
       {1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0}, {7.0, 8.0}}));
-  BOOST_TEST(four.text.find("[3]") == std::string::npos);
+  BOOST_TEST(four.text.find("x: 7.0") == std::string::npos);
   BOOST_TEST(four.text.find("... 1 items omitted") != std::string::npos);
 }
 
@@ -413,7 +431,7 @@ BOOST_AUTO_TEST_CASE(renders_primitive_floating_sequence_elements) {
       valueSource(std::vector<double>{1.0, 2.5, 3.0}));
 
   BOOST_TEST(result.status == OCL::detail::StructuredValueRenderStatus::rendered);
-  BOOST_TEST(result.text == "[[0]: 1.0, [1]: 2.5, [2]: 3.0]");
+  BOOST_TEST(result.text == "[1.0, 2.5, 3.0]");
 }
 
 BOOST_AUTO_TEST_CASE(renders_primitive_integer_sequence_elements) {
@@ -422,7 +440,7 @@ BOOST_AUTO_TEST_CASE(renders_primitive_integer_sequence_elements) {
       valueSource(std::vector<std::int32_t>{10, 20}));
 
   BOOST_TEST(result.status == OCL::detail::StructuredValueRenderStatus::rendered);
-  BOOST_TEST(result.text == "[[0]: 10, [1]: 20]");
+  BOOST_TEST(result.text == "[10, 20]");
 }
 
 BOOST_AUTO_TEST_CASE(renders_primitive_string_sequence_elements) {
@@ -431,16 +449,86 @@ BOOST_AUTO_TEST_CASE(renders_primitive_string_sequence_elements) {
       valueSource(std::vector<std::string>{"alpha", "beta"}));
 
   BOOST_TEST(result.status == OCL::detail::StructuredValueRenderStatus::rendered);
-  BOOST_TEST(result.text == "[[0]: alpha, [1]: beta]");
+  BOOST_TEST(result.text == "[alpha, beta]");
 }
 
-BOOST_AUTO_TEST_CASE(previews_a_thousand_sequence_items_with_a_bounded_compact_form) {
+BOOST_AUTO_TEST_CASE(previews_a_thousand_sequence_items_with_a_bounded_multiline_form) {
   loadRendererTypes();
   using PointArray = std::vector<renderer_test::Point>;
   PointArray values(1000, renderer_test::Point{1.0, 2.0});
   BOOST_TEST(OCL::detail::renderStructuredValue(valueSource(values)).text ==
-             "[[0]: {x: 1.0, y: 2.0}, [1]: {x: 1.0, y: 2.0}, "
-             "[2]: {x: 1.0, y: 2.0}, ... 997 items omitted]");
+             "[\n  /test/taskbrowser/Point{x: 1.0, y: 2.0},\n"
+             "  /test/taskbrowser/Point{x: 1.0, y: 2.0},\n"
+             "  /test/taskbrowser/Point{x: 1.0, y: 2.0},\n"
+             "  ... 997 items omitted\n]");
+}
+
+BOOST_AUTO_TEST_CASE(renders_nested_arrays_without_redundant_indices) {
+  loadRendererTypes();
+  using Matrix = std::vector<std::vector<std::int32_t>>;
+  const auto source = valueSource(Matrix{{1, 2}, {}, {3, 4}});
+  BOOST_TEST(OCL::detail::renderStructuredValue(source).text == "[[1, 2], [], [3, 4]]");
+
+  OCL::detail::StructuredValueRenderOptions options;
+  options.compact_width = 16;
+  BOOST_TEST(OCL::detail::renderStructuredValue(source, options).text ==
+             "[\n  [1, 2],\n  [],\n  [3, 4]\n]");
+  options.max_structural_depth = 1;
+  BOOST_TEST(OCL::detail::renderStructuredValue(source, options).text ==
+             "[\n  [...],\n  [...],\n  [...]\n]");
+}
+
+BOOST_AUTO_TEST_CASE(retains_custom_types_in_compact_expanded_and_collapsed_arrays) {
+  loadRendererTypes();
+  const auto source = valueSource(std::vector<renderer_test::Point>{{1.0, 2.0}});
+  OCL::detail::StructuredValueRenderOptions options;
+  options.compact_width = 30;
+  BOOST_TEST(OCL::detail::renderStructuredValue(source, options).text ==
+             "[\n  /test/taskbrowser/Point{\n    x: 1.0\n    y: 2.0\n  }\n]");
+  options.max_structural_depth = 1;
+  options.compact_width = 100;
+  BOOST_TEST(OCL::detail::renderStructuredValue(source, options).text ==
+             "[/test/taskbrowser/Point{...}]");
+  BOOST_TEST(OCL::detail::renderStructuredValue(
+                 valueSource(std::vector<renderer_test::Empty>{{}})).text ==
+             "[/test/taskbrowser/Empty{}]");
+}
+
+BOOST_AUTO_TEST_CASE(indexed_arrays_use_the_same_recursive_formatting) {
+  loadRendererTypes();
+  OCL::detail::StructuredValueRenderOptions options;
+  options.sequence_indices = true;
+  options.hexadecimal = true;
+  BOOST_TEST(OCL::detail::renderStructuredValue(
+                 valueSource(std::vector<std::int32_t>{26, 31}), options).text ==
+             "[[0]: 1a, [1]: 1f]");
+  BOOST_TEST(OCL::detail::renderStructuredValue(
+                 valueSource(std::vector<renderer_test::Point>{{1.0, 2.0}}), options).text ==
+             "[[0]: /test/taskbrowser/Point{x: 1.0, y: 2.0}]");
+  options.compact_width = 1;
+  BOOST_TEST(OCL::detail::renderStructuredValue(
+                 valueSource(std::vector<std::int32_t>{26, 31}), options).text ==
+             "[\n  [0]: 1a,\n  [1]: 1f\n]");
+}
+
+BOOST_AUTO_TEST_CASE(array_labels_and_separators_respect_the_output_budget) {
+  loadRendererTypes();
+  const auto source = valueSource(std::vector<renderer_test::Point>(4, {1.0, 2.0}));
+  for (const bool indices : {false, true}) {
+    for (const std::size_t width : {0U, 100U, 1000U}) {
+      for (std::size_t budget = 23U; budget <= 220U; ++budget) {
+        OCL::detail::StructuredValueRenderOptions options;
+        options.sequence_indices = indices;
+        options.compact_width = width;
+        options.max_result_bytes = budget;
+        const auto result = OCL::detail::renderStructuredValue(source, options);
+        BOOST_TEST(result.status == OCL::detail::StructuredValueRenderStatus::rendered);
+        BOOST_TEST(result.text.size() + 3U <= budget);
+        BOOST_TEST(result.text.find("omitted") != std::string::npos);
+        BOOST_TEST(balancedDelimiters(result.text));
+      }
+    }
+  }
 }
 
 BOOST_AUTO_TEST_CASE(collapses_structural_depth_four) {

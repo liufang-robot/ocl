@@ -46,7 +46,11 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & cmake --build "$PSScriptRoot/build-ocl" --parallel 2
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& cmake --build "$PSScriptRoot/build-ocl" --parallel 2 --target taskbrowser_value_renderer_test
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & cmake --install "$PSScriptRoot/build-ocl"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& ctest --test-dir "$PSScriptRoot/build-ocl" -R '^taskbrowser_value_renderer_test$' --output-on-failure --no-tests=error
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & ctest --test-dir "$PSScriptRoot/build-ocl" -R '^ocl_http_deployment$' --output-on-failure --no-tests=error
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
