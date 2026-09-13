@@ -111,7 +111,7 @@ end
 -- @return the processed table
 function ConnPolicy2tab(cp)
    if cp.type == 0 then cp.type = "DATA"
-   elseif cp.type == 1 then cp.type = "BUFFER"
+   elseif cp.type == -1 then cp.type = "UNBUFFERED"
    else cp.type = tostring(cp.type) .. " (invalid!)" end
 
    if cp.lock_policy == 0 then cp.lock_policy = "UNSYNC"

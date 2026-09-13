@@ -1225,8 +1225,6 @@ static int Port_connect(lua_State *L)
 	PortInterface **pip1, **pip2;
 	PortInterface *pi1 = NULL;
 	PortInterface *pi2 = NULL;
-	ConnPolicy **cpp;
-	ConnPolicy *cp = NULL;
 
 	if((pip1 = (PortInterface**) luaL_testudata(L, 1, "InputPort")) != NULL) {
 		pi1= *pip1;
@@ -1249,14 +1247,19 @@ static int Port_connect(lua_State *L)
 			   lua_typename(L, arg_type));
 	}
 
-	if((cpp = (ConnPolicy**) luaL_testudata(L, 3, "ConnPolicy")) != NULL) {
-		cp=*cpp;
-	}
-
-	if ( cp )
-		ret = pi1->connectTo(pi2, *cp);
-	else
+	if (lua_gettop(L) > 2) {
+		DataSourceBase::shared_ptr* value = luaM_testudata_mt(L, 3, "Variable", DataSourceBase::shared_ptr);
+		DataSource<ConnPolicy>* policy = value ? DataSource<ConnPolicy>::narrow(value->get()) : NULL;
+		if (!policy)
+			return luaL_error(L, "Port.connect: argument 3 must be a ConnPolicy Variable");
+		if (!policy->evaluate())
+			return luaL_error(L, "Port.connect: cannot evaluate the connection policy");
+		if (policy->rvalue().type != ConnPolicy::DATA)
+			return luaL_error(L, "Port.connect: data ports require DATA (0); FIFO and circular-buffer modes were removed");
+		ret = pi1->connectTo(pi2, policy->get());
+	} else {
 		ret = pi1->connectTo(pi2);
+	}
 
 	lua_pushboolean(L, ret);
 

@@ -19,6 +19,11 @@ An empty member path selects the whole value. Selected types and fixed-array
 shapes must match exactly. Destination writers must not overlap. Declarations
 and finalization must complete while all involved components are stopped.
 
+Data ports deliver the latest published value. FIFO and circular-buffer modes
+are removed; XML and script policies using numeric types 1 or 2 fail instead of
+changing delivery semantics. Use `DATA` (0) for port connections. Transport
+capacity and internal operation/network queues do not create a data-port history.
+
 Lua provides `input:data()`, `input:status()`, `output:data(value)`, and
 `output:data()`. Image getters return detached copies; input copies cannot modify
 the actual input image. A running component's images are accessible only in its
@@ -26,6 +31,11 @@ own execution context, including native lifecycle hooks such as `startHook`.
 `output:snapshot()` safely observes a committed output
 from another context. Image assignment never publishes immediately. The manual
 `read` and `write` methods have been removed.
+
+Lua's `source:connect(sink)` uses the default policy. To supply one explicitly,
+create `policy = rtt.Variable.new("ConnPolicy")`, set `policy.type = 0`, and call
+`source:connect(sink, policy)`. Unsupported policy argument types and removed
+delivery modes raise an error.
 
 TaskBrowser displays synchronized snapshots. Reporting also observes committed
 snapshots independently of component input subscriptions. Configure a periodic

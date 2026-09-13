@@ -57,10 +57,9 @@
 	A number of file formats can be selected.
       </para>
       <para>
-				The Reporter can use buffers in order to log all data it receives
-				or just report the last values in case it is flooded with data.
-				By default, the Reporter will setup unbuffered connections and you
-				need to override this manually if you wish to deviate from that.
+				The Reporter samples the latest committed port values. Multiple
+                publications between reporting cycles may be coalesced; it does not
+                retain a history of every publication in a data port queue.
       </para>
       <para>
 	A common usage scenario of the

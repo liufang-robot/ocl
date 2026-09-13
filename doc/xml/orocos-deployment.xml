@@ -463,10 +463,8 @@
 
   <!-- You can set per data flow connection policies -->
   <struct name="SensorValuesConnection" type="ConnPolicy">
-    <!-- Type is 'shared data' or buffered: DATA: 0 , BUFFER: 1 -->
-    <simple name="type" type="short"><value>1</value></simple>
-    <!-- buffer size is 12 -->
-    <simple name="size" type="short"><value>12</value></simple>
+    <!-- DATA (0): retain the latest published value -->
+    <simple name="type" type="short"><value>0</value></simple>
   </struct>
   <!-- You can repeat this struct for each connection below ... -->
 
@@ -671,10 +669,8 @@
 	    <programlisting><![CDATA[
   <!-- You can set per data flow connection policies -->
   <struct name="SensorValuesConnection" type="ConnPolicy">
-    <!-- Type is 'shared data' or buffered: DATA: 0 , BUFFER: 1 -->
-    <simple name="type" type="short"><value>1</value></simple>
-    <!-- buffer size is 12 -->
-    <simple name="size" type="short"><value>12</value></simple>
+    <!-- DATA (0): retain the latest published value -->
+    <simple name="type" type="short"><value>0</value></simple>
   </struct>
   <!-- You can repeat this struct for each connection below ... -->
     ]]></programlisting>
@@ -720,11 +716,13 @@
 		In scripting, you can use the <function>ConnPolicy</function> struct
 		for connecting ports. For example:
 		<programlisting>  var ConnPolicy cp
-  cp.type = BUFFER
-  cp.size = 10 // buffer of size 10
+  cp.type = DATA
   connect("Plant.Position", "Controller.SensorValues", cp )
 </programlisting>
     You may re-use the 'cp' object multiple times for different connections.
+    Data ports retain the latest value. Numeric FIFO and circular-buffer policy
+    types 1 and 2 are rejected; configuring a transport capacity does not change
+    this latest-value behavior.
     Streams can be created likewise, with the <function>stream</function>
 		operation of the deployer, which only takes a port and a connection
 		policy as argument.

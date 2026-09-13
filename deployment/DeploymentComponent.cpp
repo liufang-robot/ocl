@@ -81,6 +81,16 @@ namespace OCL
 
     static int got_signal = -1;
 
+    static bool validConnectionPolicy(const ConnPolicy& policy, bool allowOutputStream)
+    {
+        if (policy.type == ConnPolicy::DATA ||
+            (allowOutputStream && policy.type == ConnPolicy::UNBUFFERED)) return true;
+        Logger::log().logf(Logger::Error, "DeploymentComponent",
+                           "Unsupported data port connection policy type %d. Use DATA (0); FIFO and circular-buffer modes were removed.",
+                           policy.type);
+        return false;
+    }
+
     // Signal code only on Posix:
 #if defined(USE_SIGNALS)
     // catch ctrl+c signal
@@ -738,6 +748,7 @@ namespace OCL
 
     bool DeploymentComponent::createStream(const std::string& comp, const std::string& port, ConnPolicy policy)
     {
+        if (!validConnectionPolicy(policy, true)) return false;
         Service::shared_ptr serv = stringToService(comp);
         if ( !serv )
             return false;
@@ -754,6 +765,7 @@ namespace OCL
     // New API:
     bool DeploymentComponent::connect(const std::string& one, const std::string& other, ConnPolicy cp)
     {
+        if (!validConnectionPolicy(cp, false)) return false;
 		base::PortInterface* ap, *bp;
 		ap = stringToPort(one);
 		bp = stringToPort(other);
@@ -783,6 +795,7 @@ namespace OCL
 
     bool DeploymentComponent::stream(const std::string& port, ConnPolicy policy)
     {
+        if (!validConnectionPolicy(policy, true)) return false;
         base::PortInterface* porti = stringToPort(port);
         if ( !porti ) {
             return false;
@@ -1207,6 +1220,10 @@ namespace OCL
                         assert( cp_prop.ready() );
                         if ( cp_prop.compose( comp ) ) {
                             //It's a connection policy.
+                            if (!validConnectionPolicy(cp_prop.get(), cp_prop.getName() != "Default")) {
+                                valid = false;
+                                continue;
+                            }
 #if defined(RTT_VERSION_GTE)
 #if RTT_VERSION_GTE(2,8,99)
                             // Set default ConnPolicy
@@ -1223,6 +1240,14 @@ namespace OCL
 #endif
                             Logger::log().logf(Logger::Debug, "DeploymentComponent::loadComponents",
                                                "Saw connection policy %s", (*it)->getName().c_str());
+                            continue;
+                        }
+
+                        if (comp.rvalue().getType() == "ConnPolicy") {
+                            Logger::log().logf(Logger::Error, "DeploymentComponent::loadComponents",
+                                               "Invalid connection policy '%s'. Data ports require DATA (0); FIFO and circular-buffer modes were removed.",
+                                               comp.getName().c_str());
+                            valid = false;
                             continue;
                         }
 

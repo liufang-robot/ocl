@@ -6,6 +6,8 @@
 #include <rtt/types/StructTypeInfo.hpp>
 #include <boost/serialization/nvp.hpp>
 #include <iostream>
+#include <fstream>
+#include <cstdio>
 #include <stdexcept>
 
 namespace {
@@ -75,9 +77,53 @@ public:
 void cycle(RTT::TaskContext& component) {
     require(component.getActivity()->execute(), "native cycle execution");
 }
+
+void rejectRemovedPolicies() {
+    struct PolicyFile {
+        const char* path = "cyclic-policy-rejection.cpf";
+        ~PolicyFile() { std::remove(path); }
+        void write(const char* name, int type) {
+            std::ofstream file(path);
+            file << "<?xml version=\"1.0\"?><properties><struct name=\"" << name
+                 << "\" type=\"ConnPolicy\"><simple name=\"type\" type=\"long\"><value>"
+                 << type << "</value></simple><simple name=\"size\" type=\"long\">"
+                 << "<value>12</value></simple></struct></properties>";
+            require(file.good(), "write connection policy fixture");
+        }
+    } file;
+    struct RestoreDefault {
+        RTT::ConnPolicy saved = RTT::ConnPolicy::Default();
+        ~RestoreDefault() { RTT::ConnPolicy::Default() = saved; }
+    } restore;
+    RTT::ConnPolicy::Default() = RTT::ConnPolicy::data();
+    for (int type : {1, 2}) {
+        for (const char* name : {"removed_policy", "Default"}) {
+            OCL::DeploymentComponent deployer("policy_deployer");
+            file.write(name, type);
+            require(!deployer.loadComponents(file.path), "reject removed numeric XML connection policy");
+            require(RTT::ConnPolicy::Default().type == RTT::ConnPolicy::DATA,
+                    "rejected XML policy must not change the default");
+        }
+        RTT::TaskContext source("policy_source"), sink("policy_sink");
+        RTT::OutputPort<double> output("output");
+        RTT::InputPort<double> input("input");
+        source.addPort(output); sink.addPort(input);
+        OCL::DeploymentComponent deployer("policy_deployer");
+        deployer.addPeer(&source); deployer.addPeer(&sink);
+        RTT::ConnPolicy policy = RTT::ConnPolicy::data();
+        policy.type = type; policy.size = 12;
+        require(!deployer.connect("policy_source.output", "policy_sink.input", policy),
+                "reject removed numeric policy in connect");
+        require(!input.connected() && !output.connected(), "rejected policy must not create a channel");
+    }
+    OCL::DeploymentComponent deployer("data_policy_deployer");
+    file.write("latest_values", RTT::ConnPolicy::DATA);
+    require(deployer.loadComponents(file.path), "accept latest-value XML connection policy");
+}
 }
 int ORO_main(int, char**) {
     try {
+        rejectRemovedPolicies();
         RTT::types::Types()->addType(new RTT::types::StructTypeInfo<YZ>("ocl_cyclic_yz"));
         RTT::types::Types()->addType(new RTT::types::StructTypeInfo<XY>("ocl_cyclic_xy"));
         RTT::types::Types()->addType(new RTT::types::StructTypeInfo<Nested>("ocl_cyclic_nested"));

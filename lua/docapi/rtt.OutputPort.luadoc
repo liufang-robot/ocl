@@ -37,8 +37,11 @@ function info()
 --- Connect this port to a second one.
 -- This works also without ports having been added to a TaskContext interface.
 -- @param port the port to connect to.
+-- @param policy optional rtt.Variable.new("ConnPolicy") with type DATA (0).
+-- Omit this argument to use the default policy. Unsupported argument types and
+-- removed numeric FIFO/circular-buffer policy values raise an error.
 -- @return boolean flag if connecting succeeded or not.
-function connect(port)
+function connect(port, policy)
 
 --- Disconnect this port.
 -- For this ports do not have to be added to a TaskContext interface.

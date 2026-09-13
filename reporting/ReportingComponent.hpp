@@ -70,7 +70,7 @@ namespace OCL
            <!-- Monitor all ports of a Component : -->
            <simple name="Component" type="string"><description></description><value>ComponentX</value></simple>
 
-           <!-- Monitor a single Data or base::Buffer-Port of another Component : -->
+           <!-- Monitor a single data port of another Component : -->
            <simple name="Port" type="string"><description></description><value>ComponentY.PortZ</value></simple>
            <!-- add as many lines as desired... -->
         </struct>
