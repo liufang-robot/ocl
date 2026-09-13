@@ -19,7 +19,7 @@ public:
         : RTT::TaskContext(name, PreOperational),
           receiver("TimerIn")
     {
-        ports()->addEventPort( receiver );
+        ports()->addPort( receiver );
     }
 
     bool configureHook()

@@ -25,5 +25,5 @@ endif()
 
 if(BUILD_TESTING AND TARGET rttlua AND TARGET orocos-ocl-lua)
   set_tests_properties(ocl_lua_cyclic_ports ocl_lua_cyclic_component PROPERTIES
-    ENVIRONMENT "RTT_COMPONENT_PATH=${CMAKE_INSTALL_PREFIX}/lib/orocos;OROCOS_TARGET=${OROCOS_TARGET}")
+    ENVIRONMENT "RTT_COMPONENT_PATH=${CMAKE_INSTALL_PREFIX}/lib/orocos;OROCOS_TARGET=${OROCOS_TARGET};LUA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/../modules/?.lua")
 endif()

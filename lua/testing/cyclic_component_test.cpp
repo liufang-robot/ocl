@@ -37,6 +37,21 @@ int ORO_main(int, char**) {
         }
         OCL::LuaComponent component("lua");
         component.setActivity(new RTT::extras::SlaveActivity(0.01));
+        require(component.exec_str(R"(
+            local rttlib = require('rttlib')
+            local tc = rtt.getTC()
+            assert(tc.addEventPort == nil, 'event registration must not be exposed on components')
+            local iface = rttlib.create_if({ports={{name='ordinary', datatype='Int32', type='in'}}}, tc)
+            assert(iface.ports.ordinary:info().name == 'ordinary')
+            for _, name in ipairs({'legacy', 'ordinary'}) do
+                local ok = pcall(function()
+                    rttlib.create_if({ports={{name=name, datatype='Int32', type='in+event'}}}, tc)
+                end)
+                assert(not ok, 'removed event specification must be rejected, even for an existing port')
+            end
+            tc:removePort('ordinary')
+            iface.ports.ordinary:delete()
+        )"), "ordinary Lua interface rejects removed event specifications");
         UnsupportedPort unsupported;
         component.addPort(unsupported);
         require(component.exec_str(R"(

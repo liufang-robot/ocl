@@ -344,7 +344,7 @@ public:
     addAttribute("Mode", mode);
     addConstant("Model", model);
     addPort(command);
-    addEventPort(trigger);
+    addPort(trigger);
     addPort(feedback);
 
     control->addOperation("scale", &CompleteMappingTask::scale, this,

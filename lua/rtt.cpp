@@ -2303,30 +2303,6 @@ static int TaskContext_addPort(lua_State *L)
  	return 0;
 }
 
-static int TaskContext_addEventPort(lua_State *L)
-{
-	const char* name, *desc;
-	InputPortInterface **ipi;
-	int argc = lua_gettop(L);
-	TaskContext *tc = *(luaM_checkudata_bx(L, 1, TaskContext));
-
-	if((ipi = (InputPortInterface**) luaL_testudata(L, 2, "InputPort")) == NULL)
-		return luaL_error(L, "addEventPort: invalid argument, not an InputPort");
-
-	if(argc > 2) {
-		name = luaL_checkstring(L, 3);
-		(*ipi)->setName(name);
-	}
-
-	if(argc > 3) {
-		desc = luaL_checkstring(L, 4);
-		(*ipi)->doc(desc);
-	}
-
-	tc->ports()->addEventPort(**ipi);
- 	return 0;
-}
-
 static int TaskContext_getPort(lua_State *L)
 {
 	const char* name;
@@ -2750,7 +2726,6 @@ static const struct luaL_Reg TaskContext_f [] = {
 	{ "getPeer", TaskContext_getPeer },
 	{ "getPortNames", TaskContext_getPortNames },
 	{ "addPort", TaskContext_addPort },
-	{ "addEventPort", TaskContext_addEventPort },
 	{ "getPort", TaskContext_getPort },
 	{ "removePort", TaskContext_removePort },
 	{ "addProperty", TaskContext_addProperty },
@@ -2792,7 +2767,6 @@ static const struct luaL_Reg TaskContext_m [] = {
 	{ "getPeer", TaskContext_getPeer },
 	{ "getPortNames", TaskContext_getPortNames },
 	{ "addPort", TaskContext_addPort },
-	{ "addEventPort", TaskContext_addEventPort },
 	{ "getPort", TaskContext_getPort },
 	{ "removePort", TaskContext_removePort },
 	{ "addProperty", TaskContext_addProperty },

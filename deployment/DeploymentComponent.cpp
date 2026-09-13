@@ -170,12 +170,9 @@ namespace OCL
 
 
         this->addOperation("connectPort", &DeploymentComponent::connectPort, this, ClientThread)
-            .doc("Declare an exactly typed whole-port cyclic connection.")
-            .arg("Source", "Service-qualified output port.").arg("Destination", "Service-qualified input port.");
-        this->addOperation("connectMember", &DeploymentComponent::connectMember, this, ClientThread)
-            .doc("Declare a typed cyclic member mapping. Empty member paths select whole values.")
-            .arg("Source", "Service-qualified output port.").arg("SourceMember", "Member or fixed-array path.")
-            .arg("Destination", "Service-qualified input port.").arg("DestinationMember", "Member or fixed-array path.");
+            .doc("Declare an exactly typed cyclic connection between whole values or selected members.")
+            .arg("Source", "Service-qualified output port, optionally followed by ::member[index].nested.")
+            .arg("Destination", "Service-qualified input port, optionally followed by ::member[index].nested.");
         this->addOperation("finalizeConnections", &DeploymentComponent::finalizeConnections, this, ClientThread)
             .doc("Validate and prepare cyclic connections of all peers before activation.");
 
@@ -645,16 +642,26 @@ namespace OCL
 
     bool DeploymentComponent::connectPort(const std::string& source, const std::string& destination)
     {
-        return connectMember(source, "", destination, "");
-    }
-
-    bool DeploymentComponent::connectMember(const std::string& source, const std::string& sourceMember,
-                                             const std::string& destination, const std::string& destinationMember)
-    {
-        base::OutputPortInterface* output = dynamic_cast<base::OutputPortInterface*>(stringToPort(source));
-        base::InputPortInterface* input = dynamic_cast<base::InputPortInterface*>(stringToPort(destination));
+        const auto splitEndpoint = [](const std::string& endpoint, std::string& port, std::string& member) {
+            const std::string::size_type boundary = endpoint.find("::");
+            port = endpoint.substr(0, boundary);
+            member = boundary == std::string::npos ? "" : endpoint.substr(boundary + 2);
+            return !port.empty() && port.find(':') == std::string::npos
+                && member.find(':') == std::string::npos
+                && (boundary == std::string::npos || !member.empty());
+        };
+        std::string sourcePort, sourceMember, destinationPort, destinationMember;
+        if (!splitEndpoint(source, sourcePort, sourceMember)
+            || !splitEndpoint(destination, destinationPort, destinationMember)) {
+            Logger::log().logf(Logger::Error, "DeploymentComponent::connectPort",
+                              "Invalid endpoint: '%s' -> '%s'; use component.service.port[::member[index].nested]",
+                              source.c_str(), destination.c_str());
+            return false;
+        }
+        base::OutputPortInterface* output = dynamic_cast<base::OutputPortInterface*>(stringToPort(sourcePort));
+        base::InputPortInterface* input = dynamic_cast<base::InputPortInterface*>(stringToPort(destinationPort));
         if (!output || !input) {
-            Logger::log().logf(Logger::Error, "DeploymentComponent::connectMember",
+            Logger::log().logf(Logger::Error, "DeploymentComponent::connectPort",
                               "Expected output '%s' and input '%s'", source.c_str(), destination.c_str());
             return false;
         }

@@ -4,6 +4,7 @@
 #include <rtt/extras/SlaveActivity.hpp>
 #include <rtt/os/main.h>
 #include <rtt/types/StructTypeInfo.hpp>
+#include <rtt/types/CArrayTypeInfo.hpp>
 #include <boost/serialization/nvp.hpp>
 #include <iostream>
 #include <fstream>
@@ -25,8 +26,20 @@ struct XY {
 };
 struct Nested {
     YZ sample;
+    YZ axes[3];
+    double values[3] = {};
+    int mode = 0;
     template<class Archive> void serialize(Archive& ar, unsigned) {
-        ar & BOOST_SERIALIZATION_NVP(sample);
+        ar & BOOST_SERIALIZATION_NVP(sample)
+           & boost::serialization::make_nvp("axes", boost::serialization::make_array(axes, 3))
+           & boost::serialization::make_nvp("values", boost::serialization::make_array(values, 3))
+           & BOOST_SERIALIZATION_NVP(mode);
+    }
+};
+struct ShortArray {
+    double values[2] = {};
+    template<class Archive> void serialize(Archive& ar, unsigned) {
+        ar & boost::serialization::make_nvp("values", boost::serialization::make_array(values, 2));
     }
 };
 void require(bool value, const char* message) {
@@ -36,16 +49,19 @@ class Producer : public RTT::TaskContext {
 public:
     RTT::OutputPort<YZ> sample{"sample"};
     RTT::OutputPort<Nested> nested{"nested"};
+    RTT::OutputPort<ShortArray> shortArray{"short_array"};
     Producer() : TaskContext("Source") {
         auto motion = RTT::Service::Create("motion");
         auto io = RTT::Service::Create("io");
         provides()->addService(motion); motion->addService(io);
-        io->addPort(sample); addPort(nested);
+        io->addPort(sample); addPort(nested); addPort(shortArray);
         setActivity(new RTT::extras::SlaveActivity(0.01));
     }
     void updateHook() override {
         sample.data().y = 7; sample.data().z = 11;
         nested.data().sample.y = 13; nested.data().sample.z = 17;
+        nested.data().axes[2].y = 23; nested.data().axes[2].z = 29;
+        nested.data().values[0] = 31; nested.data().values[1] = 37; nested.data().values[2] = 41;
     }
 };
 class Scalar : public RTT::TaskContext {
@@ -61,9 +77,12 @@ public:
     RTT::InputPort<XY> fused{"fused"};
     RTT::InputPort<YZ> copy{"copy"}, selected{"selected"};
     RTT::InputPort<Nested> nested{"nested"};
+    RTT::InputPort<Nested> invalid{"invalid"};
+    RTT::InputPort<double> scalar{"scalar"}, unmapped{"unmapped"};
     unsigned cycles = 0;
     Consumer() : TaskContext("Sink") {
         addPort(fused); addPort(copy); addPort(nested); addPort(selected);
+        addPort(invalid); addPort(scalar); addPort(unmapped);
         setActivity(new RTT::extras::SlaveActivity(0.01));
     }
     void updateHook() override {
@@ -71,6 +90,11 @@ public:
         require(copy.data().y == 7 && copy.data().z == 11, "whole port connection");
         require(nested.data().sample.z == 11, "whole value to member connection");
         require(selected.data().y == 13 && selected.data().z == 17, "member to whole value connection");
+        require(nested.data().axes[0].y == 23 && nested.data().axes[0].z == 29, "fixed-array struct selection");
+        require(nested.data().axes[1].y == 42 && nested.data().axes[1].z == 0, "scalar to nested fixed-array member");
+        require(nested.data().values[0] == 31 && nested.data().values[1] == 37 && nested.data().values[2] == 41,
+                "whole fixed-array member connection");
+        require(scalar.data() == 23, "nested fixed-array member to scalar");
         ++cycles;
     }
 };
@@ -126,16 +150,39 @@ int ORO_main(int, char**) {
         rejectRemovedPolicies();
         RTT::types::Types()->addType(new RTT::types::StructTypeInfo<YZ>("ocl_cyclic_yz"));
         RTT::types::Types()->addType(new RTT::types::StructTypeInfo<XY>("ocl_cyclic_xy"));
+        RTT::types::Types()->addType(new RTT::types::CArrayTypeInfo<RTT::types::carray<YZ>>("ocl_cyclic_axes"));
+        RTT::types::Types()->addType(new RTT::types::CArrayTypeInfo<RTT::types::carray<double>>("ocl_cyclic_values"));
         RTT::types::Types()->addType(new RTT::types::StructTypeInfo<Nested>("ocl_cyclic_nested"));
+        RTT::types::Types()->addType(new RTT::types::StructTypeInfo<ShortArray>("ocl_cyclic_short_array"));
         Producer producer; Scalar scalar; Consumer consumer;
         OCL::DeploymentComponent deployer("cyclic_deployer");
         deployer.addPeer(&producer); deployer.addPeer(&scalar); deployer.addPeer(&consumer);
-        for (const auto* operation : {"connect", "connectPorts", "connectPort", "connectMember", "finalizeConnections"})
+        for (const auto* operation : {"connect", "connectPorts", "connectPort", "finalizeConnections"})
             require(deployer.provides()->hasOperation(operation), "missing cyclic deployment operation");
         require(!deployer.provides()->hasOperation("connectTwoPorts"), "removed connectTwoPorts operation remains available");
+        require(!deployer.provides()->hasOperation("connectMember"), "removed connectMember operation remains available");
+        for (const char* source : {"", "::sample", "Source.nested::", "Source.nested::sample::y",
+                                   "Source.nested:::sample", "Source..nested", "Source.nested.", "Source"}) {
+            require(!deployer.connectPort(source, "Sink.invalid"), "reject malformed source endpoint");
+            require(!consumer.invalid.connected(), "malformed source must not create a connection");
+        }
+        for (const char* destination : {"", "::sample", "Sink.invalid::", "Sink.invalid::sample::y",
+                                        "Sink.invalid:::sample", "Sink..invalid", "Sink.invalid.", "Sink"}) {
+            require(!deployer.connectPort("Source.nested", destination), "reject malformed destination endpoint");
+            require(!consumer.invalid.connected(), "malformed destination must not create a connection");
+        }
+        for (const char* source : {"Source.nested::missing", "Source.nested::axes[-1].y", "Source.nested::axes[3].y",
+                                   "Source.nested::axes[1x].y", "Source.nested::axes[1].", "Source.nested::sample..y"}) {
+            require(!deployer.connectPort(source, "Sink.unmapped"), "reject invalid member or fixed-array selector");
+            require(!consumer.unmapped.connected(), "invalid member must not create a connection");
+        }
+        require(!deployer.connectPort("Source.nested::mode", "Sink.unmapped"), "reject different selected types");
+        require(!deployer.connectPort("Source.short_array::values", "Sink.invalid::values"), "reject different fixed-array shapes");
         require(deployer.runScript(OCL_CYCLIC_CONNECTION_SCRIPT), "real deployment script");
-        require(!deployer.connectMember("Source.motion.io.sample", "y", "Sink.fused", "x"), "reject duplicate writer");
-        require(!deployer.connectMember("Source.motion.io.sample", "missing", "Sink.fused", "x"), "reject unknown member");
+        require(!deployer.connectPort("Source.motion.io.sample::y", "Sink.fused::x"), "reject duplicate writer");
+        require(!deployer.connectPort("Source.nested", "Sink.nested"), "reject whole writer overlapping members");
+        require(!deployer.connectPort("Scalar.value", "Sink.copy::y"), "reject member writer overlapping whole value");
+        require(!deployer.connectPort("Scalar.value", "Sink.nested::axes[0].y"), "reject writer overlapping selected struct");
         require(!deployer.connectPort("Source", "Sink.copy"), "reject incomplete qualified port path");
         require(!deployer.connectPort("Source.motion.io.sample", "Sink.fused"), "reject different parent types");
         require(!deployer.connectPort("Source.motion.missing.sample", "Sink.copy"), "reject unknown service");

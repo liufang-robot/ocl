@@ -10,14 +10,25 @@ Declare deployment mappings with service-qualified port names:
 
 ```text
 connectPort("source.motion.state", "sink.state")
-connectMember("source.motion.state", "axes[2].position", "sink.command", "position")
-connectMember("scalar.value", "", "sink.command", "velocity")
+connectPort("source.motion.state::axes[2].position", "sink.command::position")
+connectPort("scalar.value", "sink.command::velocity")
 finalizeConnections()
 ```
 
-An empty member path selects the whole value. Selected types and fixed-array
-shapes must match exactly. Destination writers must not overlap. Declarations
-and finalization must complete while all involved components are stopped.
+Omit `::` to select the whole value. The path before `::` resolves the component,
+nested services, and port; the path after it selects reflected members and fixed
+array elements. Empty selectors and repeated delimiters are invalid. Selected
+types and fixed-array shapes must match exactly. Destination writers must not
+overlap. Declarations and finalization must complete while all involved
+components are stopped. The separate `connectMember` deployment operation and
+C++ method have been removed.
+
+Register every data port with `addPort`. Data publication does not schedule a
+consumer: configure its periodic activity or execute it through an explicit
+external scheduler. Each scheduled cycle refreshes inputs, runs `updateHook`,
+and publishes outputs. `addEventPort` has been removed, including the Lua binding;
+Lua `rttlib.create_if` accepts only `in` and `out` port specifications and rejects
+the removed `in+event` form.
 
 Data ports deliver the latest published value. FIFO and circular-buffer modes
 are removed; XML and script policies using numeric types 1 or 2 fail instead of

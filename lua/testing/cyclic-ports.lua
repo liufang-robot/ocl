@@ -1,4 +1,5 @@
 local rtt = require('rtt')
+assert(rtt.TaskContext.addEventPort == nil, 'event registration must not be exposed')
 assert(rtt.InputPort.read == nil, 'manual input transfer must not be exposed')
 assert(rtt.OutputPort.write == nil, 'manual output transfer must not be exposed')
 local source = rtt.OutputPort.new('Int32', 'source')

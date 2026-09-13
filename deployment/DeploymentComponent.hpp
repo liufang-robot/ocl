@@ -333,10 +333,11 @@ namespace OCL
          */
         bool createDataPortConnections(const bool skipUnconnected);
 
-        /** Declare a cyclic whole-value or selected-member connection. */
+        /** Declare a cyclic connection between exactly matching value types.
+         * Endpoints use component.service.port with an optional ::member[index].nested
+         * selector. Omit :: to select the whole port value. Both owners must be stopped.
+         */
         bool connectPort(const std::string& source, const std::string& destination);
-        bool connectMember(const std::string& source, const std::string& sourceMember,
-                           const std::string& destination, const std::string& destinationMember);
         /** Prepare every peer's cyclic connections while stopped. */
         bool finalizeConnections();
 
