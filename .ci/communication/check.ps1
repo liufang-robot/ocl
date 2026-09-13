@@ -3,9 +3,12 @@ $ErrorActionPreference = "Stop"
 $repository = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $staging = Join-Path $PSScriptRoot "install"
 $httpDependencies = Join-Path $PSScriptRoot "vcpkg/installed/x64-windows"
+$sdkReleaseBin = Join-Path $env:CONDA_PREFIX "Library/vcpkg/bin"
 $env:CMAKE_PREFIX_PATH = "$staging;$env:CMAKE_PREFIX_PATH;$httpDependencies"
 $env:PKG_CONFIG_PATH = "$staging/lib/pkgconfig;$env:PKG_CONFIG_PATH"
-$env:PATH = "$staging/bin;$staging/lib;$staging/lib/orocos/win32/types;$staging/lib/orocos/win32/plugins;$staging/lib/orocos/win32/ocl/types;$httpDependencies/bin;$env:PATH"
+# The development environment prepends Debug DLLs. These Release binaries must
+# share the Release CRT with Readline when exchanging completion allocations.
+$env:PATH = "$staging/bin;$staging/lib;$staging/lib/orocos/win32/types;$staging/lib/orocos/win32/plugins;$staging/lib/orocos/win32/ocl/types;$httpDependencies/bin;$sdkReleaseBin;$env:PATH"
 $env:RTT_COMPONENT_PATH = "$staging/lib/orocos"
 $env:OROCOS_COMPONENT_PATH = $env:RTT_COMPONENT_PATH
 
