@@ -26,6 +26,7 @@ struct StructuredValueRenderOptions {
 
 enum class StructuredValueRenderStatus {
   rendered,
+  unavailable,
   evaluation_failed,
 };
 

@@ -14,6 +14,7 @@
 #include <boost/test/included/unit_test.hpp>
 
 #include <rtt/internal/PortDataAccess.hpp>
+#include <rtt/PortEndpoint.hpp>
 #include <rtt/extras/SlaveActivity.hpp>
 #include "deployment/OpcUaDeploymentComponent.hpp"
 
@@ -472,6 +473,8 @@ std::vector<std::string> operationNames(RTT::Service::shared_ptr service) {
 }
 
 const std::vector<std::string> kExpectedOpcUaOperations{
+    "disableInputWrite",
+    "enableInputWrite",
     "endpointUrl",
     "isRunning",
     "lastError",
@@ -545,6 +548,31 @@ public:
 RTT::TaskContext *createHeldTask(std::string name) { return new HeldTask(name); }
 
 } // namespace
+
+BOOST_AUTO_TEST_CASE(input_writing_is_explicit_and_separate_from_publication) {
+  loadRttTypes();
+  CompleteMappingTask local;
+  OCL::OpcUaDeploymentComponent deployer("Deployer", "", deploymentOptions());
+  BOOST_REQUIRE(deployer.addPeer(&local));
+  BOOST_REQUIRE(deployer.startOpcUa());
+  BOOST_REQUIRE(deployer.publishComponent(local.getName()));
+  BOOST_TEST(!local.command.connected());
+  BOOST_TEST(!local.feedback.connected());
+  const auto service = deployer.provides("opcua");
+  RTT::OperationCaller<bool(const std::string &)> enable = service->getOperation("enableInputWrite");
+  RTT::OperationCaller<bool(const std::string &)> disable = service->getOperation("disableInputWrite");
+  BOOST_REQUIRE(enable.ready() && disable.ready());
+  BOOST_TEST(!enable("CompleteMapping.Feedback"));
+  BOOST_TEST(!enable("Missing.Command"));
+  BOOST_TEST(!enable("CompleteMapping.Command::field"));
+  BOOST_REQUIRE(enable("CompleteMapping.control.ServiceCommand"));
+  BOOST_TEST(local.service_command.connected());
+  BOOST_REQUIRE(local.start());
+  BOOST_TEST(!disable("CompleteMapping.control.ServiceCommand"));
+  BOOST_REQUIRE(local.stop());
+  BOOST_TEST(disable("CompleteMapping.control.ServiceCommand"));
+  BOOST_TEST(!local.service_command.connected());
+}
 
 BOOST_AUTO_TEST_CASE(endpoint_start_publishes_no_components) {
   loadRttTypes();
@@ -848,11 +876,11 @@ BOOST_AUTO_TEST_CASE(strict_publication_is_static_and_idempotent) {
   requirePortValue(
       client, namespace_index,
       {"components", "CompleteMapping", "ports", "Command", "value"},
-      ::opcua::NodeId(::opcua::DataTypeId::Int32), true, true);
+      ::opcua::NodeId(::opcua::DataTypeId::Int32), true, false);
   requirePortValue(
       client, namespace_index,
       {"components", "CompleteMapping", "ports", "Trigger", "value"},
-      ::opcua::NodeId(::opcua::DataTypeId::Boolean), true, true);
+      ::opcua::NodeId(::opcua::DataTypeId::Boolean), true, false);
   requirePortValue(
       client, namespace_index,
       {"components", "CompleteMapping", "ports", "Feedback", "value"},
@@ -860,7 +888,7 @@ BOOST_AUTO_TEST_CASE(strict_publication_is_static_and_idempotent) {
   requirePortValue(client, namespace_index,
                    {"components", "CompleteMapping", "services", "control",
                     "ports", "ServiceCommand", "value"},
-                   ::opcua::NodeId(::opcua::DataTypeId::Int32), true, true);
+                   ::opcua::NodeId(::opcua::DataTypeId::Int32), true, false);
   requirePortValue(client, namespace_index,
                    {"components", "CompleteMapping", "services", "control",
                     "ports", "ServiceFeedback", "value"},
@@ -881,32 +909,24 @@ BOOST_AUTO_TEST_CASE(strict_publication_is_static_and_idempotent) {
        }) {
     requireMissingNode(client, modelNodeId(namespace_index, method_path));
   }
-  BOOST_REQUIRE(::opcua::services::readNodeClass(
-      client,
-      modelNodeId(namespace_index, {"components", "CompleteMapping", "services",
-                                    "Command", "operations"})));
-  BOOST_REQUIRE(::opcua::services::readNodeClass(
-      client,
-      modelNodeId(namespace_index, {"components", "CompleteMapping", "services",
-                                    "Command", "operations", "status"})));
-  for (const std::string_view category :
-       {"properties", "attributes", "ports", "services"}) {
-    requireMissingNode(client, modelNodeId(namespace_index,
-                                           {"components", "CompleteMapping",
-                                            "services", "Command", category}));
-  }
+  requireMissingNode(client, modelNodeId(namespace_index,
+      {"components", "CompleteMapping", "services", "Command"}));
 
   const auto command_value_id =
       modelNodeId(namespace_index, {"components", "CompleteMapping", "ports",
                                     "Command", "value"});
   const auto initial_command =
       ::opcua::services::readValue(client, command_value_id);
-  BOOST_REQUIRE(!initial_command);
-  BOOST_TEST(initial_command.code() == UA_STATUSCODE_BADWAITINGFORINITIALDATA);
+  BOOST_REQUIRE(initial_command);
+  BOOST_TEST(initial_command.value().to<std::int32_t>() == 0);
 
+  BOOST_TEST(!::opcua::services::writeValue(client, command_value_id,
+                                           ::opcua::Variant(std::int32_t{61})).isGood());
+  BOOST_REQUIRE(deployer.enableInputWrite("CompleteMapping.Command"));
   BOOST_TEST(::opcua::services::writeValue(client, command_value_id,
                                            ::opcua::Variant(std::int32_t{61}))
                  .isGood());
+  BOOST_TEST(::opcua::services::readValue(client, command_value_id).value().to<std::int32_t>() == 0);
   std::int32_t direct_command_value = 0;
   BOOST_REQUIRE(waitUntil([&] {
     complete.cycle();
@@ -985,18 +1005,15 @@ BOOST_AUTO_TEST_CASE(strict_publication_is_static_and_idempotent) {
   BOOST_REQUIRE(remote_command != nullptr);
   BOOST_REQUIRE(remote_feedback != nullptr);
   BOOST_REQUIRE(complete_proxy->ports()->getPort("Trigger") != nullptr);
-  RTT::Service::shared_ptr command_service =
-      complete_proxy->provides()->getService("Command");
-  RTT::Service::shared_ptr trigger_service =
-      complete_proxy->provides()->getService("Trigger");
-  RTT::Service::shared_ptr feedback_service =
-      complete_proxy->provides()->getService("Feedback");
-  BOOST_REQUIRE(command_service);
-  BOOST_REQUIRE(trigger_service);
-  BOOST_REQUIRE(feedback_service);
-  BOOST_REQUIRE(command_service->getOperation("status") != nullptr);
-  BOOST_REQUIRE(trigger_service->getOperation("status") != nullptr);
-  BOOST_REQUIRE(feedback_service->getOperation("snapshot") != nullptr);
+  BOOST_TEST(!complete_proxy->provides()->hasService("Command"));
+  BOOST_TEST(!complete_proxy->provides()->hasService("Trigger"));
+  BOOST_TEST(!complete_proxy->provides()->hasService("Feedback"));
+  auto feedback_observation = RTT::PortObservation::create({remote_feedback, ""}, &error);
+  BOOST_REQUIRE_MESSAGE(feedback_observation, error);
+  const auto feedback_source = RTT::internal::DataSource<std::int32_t>::narrow(
+      feedback_observation->dataSource().get());
+  BOOST_REQUIRE(feedback_source);
+  BOOST_TEST(feedback_source->get() == 84);
 
   RTT::OutputPort<std::int32_t> command_source("CommandSource");
   BOOST_REQUIRE(command_source.createConnection(
@@ -1016,10 +1033,7 @@ BOOST_AUTO_TEST_CASE(strict_publication_is_static_and_idempotent) {
   BOOST_REQUIRE(waitUntil(
       [&] { return RTT::internal::PortDataAccess::receive(feedback_sink, feedback_value) == RTT::NewData; }));
   BOOST_TEST(feedback_value == 84);
-  RTT::OperationCaller<std::int32_t()> last =
-      feedback_service->getOperation("snapshot");
-  BOOST_REQUIRE(last.ready());
-  BOOST_TEST(last() == 84);
+  BOOST_TEST(feedback_source->get() == 84);
 
   RTT::Service::shared_ptr control =
       complete_proxy->provides()->getService("control");
@@ -1048,8 +1062,8 @@ BOOST_AUTO_TEST_CASE(strict_publication_is_static_and_idempotent) {
       dynamic_cast<RTT::base::OutputPortInterface *>(
           control->getPort("ServiceFeedback"));
   BOOST_REQUIRE(remote_service_feedback != nullptr);
-  BOOST_REQUIRE(control->getService("ServiceCommand"));
-  BOOST_REQUIRE(control->getService("ServiceFeedback"));
+  BOOST_TEST(!control->hasService("ServiceCommand"));
+  BOOST_TEST(!control->hasService("ServiceFeedback"));
   RTT::InputPort<std::int32_t> service_feedback_sink("ServiceFeedbackSink");
   BOOST_REQUIRE(remote_service_feedback->createConnection(
       service_feedback_sink,

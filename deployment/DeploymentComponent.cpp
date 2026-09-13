@@ -37,6 +37,7 @@
 #include <rtt/marsh/PropertyDemarshaller.hpp>
 #include <rtt/scripting/Scripting.hpp>
 #include <rtt/ConnPolicy.hpp>
+#include <rtt/PortEndpoint.hpp>
 #include <rtt/plugin/PluginLoader.hpp>
 #include <rtt/types/GlobalsRepository.hpp>
 
@@ -171,8 +172,14 @@ namespace OCL
 
         this->addOperation("connectPort", &DeploymentComponent::connectPort, this, ClientThread)
             .doc("Declare an exactly typed cyclic connection between whole values or selected members.")
-            .arg("Source", "Service-qualified output port, optionally followed by ::member[index].nested.")
-            .arg("Destination", "Service-qualified input port, optionally followed by ::member[index].nested.");
+            .arg("Source", "Output value endpoint: component.service.port.member[index].nested.")
+            .arg("Destination", "Input value endpoint: component.service.port.member[index].nested.");
+        this->addOperation("isPortConnected", &DeploymentComponent::isPortConnected, this, ClientThread)
+            .doc("Reports whether a whole port has any source or destination connections.")
+            .arg("Port", "Whole port path: component.service.port; member selectors are rejected.");
+        this->addOperation("disconnectPort", &DeploymentComponent::disconnectPort, this, ClientThread)
+            .doc("Removes all whole and member connections of one port while its graph is stopped.")
+            .arg("Port", "Whole port path: component.service.port; member selectors are rejected.");
         this->addOperation("finalizeConnections", &DeploymentComponent::finalizeConnections, this, ClientThread)
             .doc("Validate and prepare cyclic connections of all peers before activation.");
 
@@ -640,32 +647,58 @@ namespace OCL
     	return ret;
     }
 
-    bool DeploymentComponent::connectPort(const std::string& source, const std::string& destination)
-    {
-        const auto splitEndpoint = [](const std::string& endpoint, std::string& port, std::string& member) {
-            const std::string::size_type boundary = endpoint.find("::");
-            port = endpoint.substr(0, boundary);
-            member = boundary == std::string::npos ? "" : endpoint.substr(boundary + 2);
-            return !port.empty() && port.find(':') == std::string::npos
-                && member.find(':') == std::string::npos
-                && (boundary == std::string::npos || !member.empty());
-        };
-        std::string sourcePort, sourceMember, destinationPort, destinationMember;
-        if (!splitEndpoint(source, sourcePort, sourceMember)
-            || !splitEndpoint(destination, destinationPort, destinationMember)) {
-            Logger::log().logf(Logger::Error, "DeploymentComponent::connectPort",
-                              "Invalid endpoint: '%s' -> '%s'; use component.service.port[::member[index].nested]",
-                              source.c_str(), destination.c_str());
+    namespace {
+        bool resolveDeploymentEndpoint(TaskContext& deployer, const std::string& path,
+                                       PortEndpoint& endpoint)
+        {
+            const auto separator = path.find('.');
+            if (separator == std::string::npos || separator == 0 || separator + 1 == path.size())
+                return false;
+            const auto componentName = path.substr(0, separator);
+            auto* component = componentName == deployer.getName() || componentName == "this"
+                ? &deployer : deployer.getPeer(componentName);
+            std::string error;
+            if (component && RTT::resolvePortEndpoint(*component->provides(), path.substr(separator + 1), endpoint, &error))
+                return true;
+            Logger::log().logf(Logger::Error, "DeploymentComponent",
+                              "Invalid port endpoint '%s': %s", path.c_str(),
+                              component ? error.c_str() : "unknown component");
             return false;
         }
-        base::OutputPortInterface* output = dynamic_cast<base::OutputPortInterface*>(stringToPort(sourcePort));
-        base::InputPortInterface* input = dynamic_cast<base::InputPortInterface*>(stringToPort(destinationPort));
+    }
+
+    bool DeploymentComponent::connectPort(const std::string& source, const std::string& destination)
+    {
+        auto deployment = lockDeployment();
+        PortEndpoint from, to;
+        if (!resolveDeploymentEndpoint(*this, source, from)
+            || !resolveDeploymentEndpoint(*this, destination, to)) return false;
+        auto* output = dynamic_cast<base::OutputPortInterface*>(from.port);
+        auto* input = dynamic_cast<base::InputPortInterface*>(to.port);
         if (!output || !input) {
             Logger::log().logf(Logger::Error, "DeploymentComponent::connectPort",
                               "Expected output '%s' and input '%s'", source.c_str(), destination.c_str());
             return false;
         }
-        return RTT::connectMembers(*output, sourceMember, *input, destinationMember);
+        return RTT::connectMembers(*output, from.member, *input, to.member);
+    }
+
+    bool DeploymentComponent::isPortConnected(const std::string& path)
+    {
+        auto deployment = lockDeployment();
+        PortEndpoint endpoint;
+        return resolveDeploymentEndpoint(*this, path, endpoint)
+            && endpoint.member.empty() && endpoint.port->connected();
+    }
+
+    bool DeploymentComponent::disconnectPort(const std::string& path)
+    {
+        auto deployment = lockDeployment();
+        PortEndpoint endpoint;
+        if (!resolveDeploymentEndpoint(*this, path, endpoint) || !endpoint.member.empty()
+            || !endpoint.port->connectionChangeAllowed()) return false;
+        endpoint.port->disconnect();
+        return !endpoint.port->connected();
     }
 
     bool DeploymentComponent::finalizeConnections()

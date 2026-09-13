@@ -3,6 +3,10 @@
 #include <httplib.h>
 #include <iostream>
 #include <rtt/OperationCaller.hpp>
+#include <rtt/InputPort.hpp>
+#include <rtt/OutputPort.hpp>
+#include <rtt/extras/SlaveActivity.hpp>
+#include <rtt/internal/PortDataAccess.hpp>
 #include <rtt/Property.hpp>
 #include <rtt/deployment/ComponentLoader.hpp>
 #include <rtt/internal/DataSources.hpp>
@@ -68,6 +72,9 @@ public:
   explicit Application(const std::string &name) : RTT::TaskContext(name) {
     componentAlive = true;
     addProperty("gain", gain);
+    provides("io")->addPort(command);
+    provides("io")->addPort(output);
+    setActivity(new RTT::extras::SlaveActivity(0.01));
     addOperation("hold", &Application::hold, this, RTT::ClientThread);
   }
   ~Application() { componentAlive = false; }
@@ -76,6 +83,8 @@ public:
     return true;
   }
   int gain{11};
+  RTT::InputPort<double> command{"command"};
+  RTT::OutputPort<double> output{"output"};
 };
 RTT::TaskContext *createApplication(std::string name) {
   return new Application(name);
@@ -123,6 +132,9 @@ int ORO_main(int, char **) {
     auto service = deployer.provides()->getService("http");
     auto *http = dynamic_cast<OCL::HttpDeploymentService *>(service.get());
     require(http != nullptr, "plugin uses shared HTTP service implementation");
+    RTT::OperationCaller<bool(const std::string &)> enable = service->getOperation("enableInputWrite");
+    RTT::OperationCaller<bool(const std::string &)> disable = service->getOperation("disableInputWrite");
+    require(enable.ready() && disable.ready(), "HTTP exposes explicit input source configuration");
     require(!deployer.loadService("Deployer", "http") &&
                 deployer.provides()->getService("http") == service,
             "duplicate preserves original service");
@@ -187,7 +199,22 @@ int ORO_main(int, char **) {
             "Deployer and service self-control remain unpublished");
     require(http->publishComponent("app"),
             "publish local application through HTTP");
-    auto response = browser.Get("/api/v1/components/app/properties/gain");
+    auto *app = dynamic_cast<Application *>(deployer.getPeer("app"));
+    require(app && !app->command.connected() && !app->output.connected(),
+            "HTTP publication preserves the port graph");
+    require(!enable("app.io.output") && !enable("Missing.io.command") &&
+                !enable("app.io.command::x"), "HTTP input source rejects output and malformed endpoints");
+    require(enable("app.io.command"), "HTTP facade resolves nested input endpoint");
+    auto response = browser.Post("/api/v1/components/app/services/io/ports/command/samples",
+                                 "{\"value\":18}", "application/json");
+    require(response && response->status == 204 && app->command.data() == 0.0,
+            "HTTP acknowledgement only stages input");
+    require(app->start(), "start HTTP input component");
+    require(!disable("app.io.command"), "running component retains its configured writer");
+    require(app->getActivity()->execute(), "acquire HTTP input in a cycle");
+    require(app->stop() && app->command.data() == 18.0, "component acquired staged input");
+    require(disable("app.io.command") && !app->command.connected(), "HTTP facade releases input source");
+    response = browser.Get("/api/v1/components/app/properties/gain");
     require(response && response->status == 200,
             "HTTP plugin serves its application");
     require(!deployer.unloadComponent("app"),

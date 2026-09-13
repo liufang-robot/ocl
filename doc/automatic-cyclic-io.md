@@ -10,15 +10,16 @@ Declare deployment mappings with service-qualified port names:
 
 ```text
 connectPort("source.motion.state", "sink.state")
-connectPort("source.motion.state::axes[2].position", "sink.command::position")
-connectPort("scalar.value", "sink.command::velocity")
+connectPort("source.motion.state.axes[2].position", "sink.command.position")
+connectPort("scalar.value", "sink.command.velocity")
 finalizeConnections()
 ```
 
-Omit `::` to select the whole value. The path before `::` resolves the component,
-nested services, and port; the path after it selects reflected members and fixed
-array elements. Empty selectors and repeated delimiters are invalid. Selected
-types and fixed-array shapes must match exactly. Destination writers must not
+Use the same dot/index path when inspecting a value and connecting it. The path
+resolves the component, real nested services, port, then reflected members and
+fixed-array elements. Omit members to select the whole value. Legacy `::`
+selectors, malformed paths and out-of-range indices are rejected. Selected types
+and fixed-array shapes must match exactly. Destination writers must not
 overlap. Declarations and finalization must complete while all involved
 components are stopped. The separate `connectMember` deployment operation and
 C++ method have been removed.
@@ -48,7 +49,46 @@ create `policy = rtt.Variable.new("ConnPolicy")`, set `policy.type = 0`, and cal
 `source:connect(sink, policy)`. Unsupported policy argument types and removed
 delivery modes raise an error.
 
-TaskBrowser displays synchronized snapshots. Reporting also observes committed
+TaskBrowser evaluates ports directly:
+
+```text
+source.motion.state
+source.motion.state.axes[2].position
+sink.command.velocity
+isPortConnected("sink.command")
+disconnectPort("sink.command")
+```
+
+Inputs show the last component-acquired image; outputs show the last committed
+value. Observation is read-only, does not consume samples or schedule a cycle,
+and retains the last value while stopped. Inputs initially show their default
+image. Outputs show `(unavailable)` until the first commit; an unavailable value
+cannot supply an operation argument. Ports do not create services or methods;
+fields named `data`, `snapshot`, `connected`, `name` or `status` are ordinary data.
+Use `ls component` or `ls component.service` for port types, directions, values and
+input source mappings. Real service operations remain callable.
+`isPortConnected` and `disconnectPort` accept whole-port paths only, rejecting
+member selectors. Disconnect removes all whole/member connections of that port
+and requires the affected component graph to be stopped.
+
+HTTP and OPC UA publication observes both port directions without adding
+connections. Configure external input writers explicitly while the affected graph
+is stopped, after publishing the component:
+
+```text
+http.enableInputWrite("sink.command.velocity")
+opcua.enableInputWrite("sink.command.position")
+```
+
+Each enabled endpoint reserves one whole/member writer region. Disjoint writers
+may coexist; overlapping regions, output endpoints and incompatible selected types
+are rejected. Network acknowledgements mean the value was staged; the component
+acquires it at its next input boundary. Reads continue to show the acquired input
+image. Release a source with the matching service's `disableInputWrite(endpoint)`
+while stopped. Whole structured writes require a complete validated value rather
+than merging partial JSON or member updates into component storage.
+
+Reporting also observes committed
 snapshots independently of component input subscriptions. Configure a periodic
 reporter activity or request its `snapshot()` operation explicitly. Each report
 samples each output once; samples between reports may coalesce. `ReportOnlyNewData`

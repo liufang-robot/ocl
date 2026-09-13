@@ -334,10 +334,14 @@ namespace OCL
         bool createDataPortConnections(const bool skipUnconnected);
 
         /** Declare a cyclic connection between exactly matching value types.
-         * Endpoints use component.service.port with an optional ::member[index].nested
-         * selector. Omit :: to select the whole port value. Both owners must be stopped.
+         * Endpoints use component.service.port.member[index].nested, just like value
+         * expressions. Omit members to select the whole value. Both owners must be stopped.
          */
         bool connectPort(const std::string& source, const std::string& destination);
+        /** Report any whole/member connection of a whole port. Rejects member paths. */
+        bool isPortConnected(const std::string& path);
+        /** Disconnect all writers/readers of a whole port while stopped. Rejects member paths. */
+        bool disconnectPort(const std::string& path);
         /** Prepare every peer's cyclic connections while stopped. */
         bool finalizeConnections();
 

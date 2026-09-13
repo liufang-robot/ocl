@@ -717,10 +717,10 @@
       to connect a whole output value to a matching input. Include any nested
       services in the port paths, for example
       <function>connectPort("Plant.motion.io.Position", "Controller.io.SensorValues")</function>.
-      Append <literal>::</literal> and a reflected member or fixed-array selector
-      to select part of a value, for example
-      <function>connectPort("Plant.motion.io.State::axes[2].position", "Controller.Command::position")</function>.
-      Omit the selector for a whole value. Empty selectors, repeated delimiters,
+      Append a reflected member or fixed-array selector using the same dot/index
+      path as a value expression, for example
+      <function>connectPort("Plant.motion.io.State.axes[2].position", "Controller.Command.position")</function>.
+      Omit members for a whole value. Legacy <literal>::</literal> selectors, malformed paths,
       incompatible types, and overlapping destination writers are rejected.
       The former <function>connectMember</function> operation has been removed.
       This replaces the removed <function>connectTwoPorts</function> operation

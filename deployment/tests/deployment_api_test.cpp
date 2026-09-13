@@ -7,7 +7,7 @@ concept HasConnectMember = requires(Deployer& deployer, const std::string& path)
     deployer.connectMember(path, path, path, path);
 };
 static_assert(!HasConnectMember<OCL::DeploymentComponent>,
-              "connectMember was removed; connectPort accepts optional ::selectors");
+              "connectMember was removed; connectPort accepts canonical dot/index endpoints");
 
 int main()
 {
@@ -19,5 +19,9 @@ int main()
     bool (OCL::DeploymentComponent::*connectPort)(const std::string&, const std::string&) =
         &OCL::DeploymentComponent::connectPort;
 
-    return method && connectPort ? 0 : 1;
+    bool (OCL::DeploymentComponent::*connected)(const std::string&) =
+        &OCL::DeploymentComponent::isPortConnected;
+    bool (OCL::DeploymentComponent::*disconnect)(const std::string&) =
+        &OCL::DeploymentComponent::disconnectPort;
+    return method && connectPort && connected && disconnect ? 0 : 1;
 }

@@ -59,6 +59,8 @@
 #include <rtt/extras/MultiVector.hpp>
 #include <rtt/types/TypeStream.hpp>
 #include <rtt/types/Types.hpp>
+#include <rtt/PortEndpoint.hpp>
+#include <rtt/internal/ObservationPath.hpp>
 #include "TaskBrowser.hpp"
 #include "internal/StructuredValueRenderer.hpp"
 
@@ -686,6 +688,7 @@ namespace OCL
         std::string::size_type endpos = 0;
         // Traverse the entered peer-list
         component.clear();
+        component_found.clear();
         peerpath.clear();
         // This loop separates the peer/service from the member/method
         while (endpos != std::string::npos )
@@ -698,11 +701,11 @@ namespace OCL
                 }
                 std::string item = to_parse.substr(startpos, endpos);
 
-                if ( taskobject->hasService( item ) ) {
-                    taskobject = taskobject->provides(item);
-                    itemfound = true;
-                } else
-                    if ( peer->hasPeer( item ) ) {
+                if ( !taskobject->getPort( item ) ) {
+                    if ( taskobject->hasService( item ) ) {
+                        taskobject = taskobject->provides(item);
+                        itemfound = true;
+                    } else if ( peer->hasPeer( item ) ) {
                         peer = peer->getPeer( item );
                         taskobject = peer->provides();
                         itemfound = true;
@@ -710,6 +713,7 @@ namespace OCL
                         taskobject = GlobalService::Instance()->provides(item);
                         itemfound = true;
                     }
+                }
                 if ( itemfound ) { // if "." found and correct path
                     peerpath += to_parse.substr(startpos, endpos) + ".";
                     if ( endpos != std::string::npos )
@@ -747,6 +751,14 @@ namespace OCL
                     completes.push_back( peerpath + *i + "." );
                     //cerr << "added " << peerpath+*i+"."<<endl;
                 }
+            }
+        }
+        // Ports are values, independently of real nested services.
+        v = taskobject->getPortNames();
+        for (const auto& name : v) {
+            if (name.find(component) == 0) {
+                completes.push_back(peerpath + name);
+                completes.push_back(peerpath + name + ".");
             }
         }
         // add taskobject's completes:
@@ -1596,16 +1608,22 @@ namespace OCL
 
                         InputPortInterface* iport = dynamic_cast<InputPortInterface*>(port);
                         if (iport) {
-                            DataSourceBase::shared_ptr dsb = iport->getDataSource();
-                            dsb->evaluate();
-                            sresult << " <= " << dsb;
+                            auto observation = PortObservation::create(PortEndpoint{port, ""});
+                            sresult << " <= ";
+                            auto sample = observation ? observation->snapshot() : DataSourceBase::shared_ptr();
+                            if (sample && sample->evaluate()) {
+                                doPrint(sample, false);
+                            } else sresult << "(unavailable)";
                             printInputSources(sresult, *iport);
                         }
                         OutputPortInterface* oport = dynamic_cast<OutputPortInterface*>(port);
                         if (oport) {
-                            DataSourceBase::shared_ptr dsb = oport->getDataSource();
-                            dsb->evaluate(); // Observe the committed output snapshot.
-                            sresult << " => " << dsb;
+                            auto observation = PortObservation::create(PortEndpoint{port, ""});
+                            sresult << " => ";
+                            auto sample = observation ? observation->snapshot() : DataSourceBase::shared_ptr();
+                            if (sample && sample->evaluate()) {
+                                doPrint(sample, false);
+                            } else sresult << "(unavailable)";
                         }
                     }
                 } else {
@@ -1683,14 +1701,22 @@ namespace OCL
 
     void TaskBrowser::evalCommand(std::string& comm )
     {
+        // A port value takes precedence over an equally named real service.
+        // Explicit help/ls still inspect that service.
+        auto service = stringToService(comm);
+        bool isPort = context->getPort(comm.substr(0, comm.find('.')));
+        for (auto current = service; current && !isPort; current = current->getParent()) {
+            auto parent = current->getParent();
+            isPort = parent && parent->getPort(current->getName());
+        }
         // deprecated: use 'help servicename'
-        bool result = printService(comm);
+        bool result = !isPort && printService(comm);
 
         // Minor hack : also check if it was an attribute of current TC, for example,
         // if both the object and attribute with that name exist. the if
         // statement after this one would return and not give the expr parser
         // time to evaluate 'comm'.
-        if ( context->provides()->getValue( comm ) ) {
+        if ( !context->getPort(comm) && context->provides()->getValue( comm ) ) {
             if (debug)
                 cerr << "Found value..."<<nl;
             this->printResult( context->provides()->getValue( comm )->getDataSource().get(), true );
@@ -1728,6 +1754,10 @@ namespace OCL
                 cerr << "returned (null) !"<<nl;
             //cout << "    (ok)" <<nl;
             //return; //
+        } catch ( const internal::ObservationUnavailable& ) {
+            sresult.str("");
+            cerr << "(unavailable)" << nl;
+            return;
         } catch ( fatal_semantic_parse_exception& pe ) { // incorr args, ...
             // way to fatal,  must be reported immediately
             if (debug)
@@ -1772,6 +1802,10 @@ namespace OCL
                 return; // done here
             } else if (debug)
                 cerr << "returned (null) !"<<nl;
+        } catch ( const internal::ObservationUnavailable& ) {
+            sresult.str("");
+            cerr << "(unavailable)" << nl;
+            return;
         } catch ( syntactic_parse_exception& pe ) { // missing brace etc
             // syntactic errors must be reported immediately
             if (debug)
@@ -1801,7 +1835,11 @@ namespace OCL
 
     void TaskBrowser::printResult( base::DataSourceBase* ds, bool recurse) {
         sresult << " = ";
-        if ( ds )
+        if ( auto* observation = dynamic_cast<const internal::ObservationExpression*>(ds) ) {
+            auto frozen = observation->frozen();
+            if (frozen && frozen->evaluate()) doPrint(frozen, recurse);
+            else sresult << "(unavailable)";
+        } else if ( ds )
             doPrint( ds, recurse );
         else
             sresult << "(null)";
@@ -1845,6 +1883,10 @@ namespace OCL
         options.sequence_indices = sequence_indices;
         const OCL::detail::StructuredValueRenderResult result =
             OCL::detail::renderStructuredValue(ds, options);
+        if (result.status == OCL::detail::StructuredValueRenderStatus::unavailable) {
+            sresult << "(unavailable)";
+            return;
+        }
         if (result.status == OCL::detail::StructuredValueRenderStatus::evaluation_failed) {
             sresult << "(evaluation failed)";
             return;
@@ -1940,6 +1982,13 @@ namespace OCL
         cout << "  and display the contents of complex data types (vector, array,...) :"<<nl;
         cout << "     Float64Array(6)" <<nl;
         cout << "   = {0, 0, 0, 0, 0, 0}" <<nl;
+
+        cout << "  Port values are read-only observations; use the same paths in connectPort:" << nl;
+        cout << "     source.output, source.output.y, source.io.output.axes[2].position" << nl;
+        cout << "  Inputs show the last acquired image; outputs show the last committed value." << nl;
+        cout << "  Use ls for port types, direction and source connections." << nl;
+        cout << "  Use isPortConnected(\"source.output\") or disconnectPort(\"source.output\")" << nl;
+        cout << "  for whole-port management; disconnection requires a stopped graph." << nl;
 
         cout <<titlecol("Changing Attributes and Properties")<<nl;
         cout << "  To change the value of a Task's attribute, type "<<comcol("varname = <newvalue>")<<nl;
@@ -2230,16 +2279,22 @@ namespace OCL
 
                 InputPortInterface* iport = dynamic_cast<InputPortInterface*>(port);
                 if (iport) {
-                    DataSourceBase::shared_ptr dsb = iport->getDataSource();
-                    dsb->evaluate();
-                    sresult << " <= " << dsb;
+                    auto observation = PortObservation::create(PortEndpoint{port, ""});
+                    sresult << " <= ";
+                    auto sample = observation ? observation->snapshot() : DataSourceBase::shared_ptr();
+                    if (sample && sample->evaluate()) {
+                        doPrint(sample, false);
+                    } else sresult << "(unavailable)";
                     printInputSources(sresult, *iport);
                 }
                 OutputPortInterface* oport = dynamic_cast<OutputPortInterface*>(port);
                 if (oport) {
-                    DataSourceBase::shared_ptr dsb = oport->getDataSource();
-                    dsb->evaluate(); // Observe the committed output snapshot.
-                    sresult << " => " << dsb;
+                    auto observation = PortObservation::create(PortEndpoint{port, ""});
+                    sresult << " => ";
+                    auto sample = observation ? observation->snapshot() : DataSourceBase::shared_ptr();
+                    if (sample && sample->evaluate()) {
+                        doPrint(sample, false);
+                    } else sresult << "(unavailable)";
                 }
 
 				// Port description (see Service)

@@ -247,6 +247,21 @@
     <section>
       <title>Inspecting input connections</title>
       <para>
+        Read whole port values directly, for example <literal>source.output</literal>,
+        or select typed data with <literal>source.output.y</literal> and
+        <literal>source.output.axes[2].position</literal>. Inputs show their last
+        acquired image and outputs their last committed value. These expressions
+        are read-only and do not consume samples or schedule component cycles.
+        Inputs initially show their default image. Outputs show
+        <literal>(unavailable)</literal> until the first commit; unavailable values
+        cannot supply operation arguments.
+        Ports do not generate services or methods. Manage whole ports with
+        <literal>isPortConnected("source.output")</literal> and
+        <literal>disconnectPort("source.output")</literal>; member selectors are
+        rejected by these management operations, and disconnection requires the
+        affected graph to be stopped.
+      </para>
+      <para>
         Use <literal>ls sink.io</literal> to inspect a peer's service ports, or
         <literal>ls io</literal> when visiting the sink. Each connected input
         lists the output endpoint that supplies it. Member mappings appear

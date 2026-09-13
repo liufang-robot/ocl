@@ -142,6 +142,7 @@ IF ( BUILD_DEPLOYMENT )
           target_link_libraries(ocl_opcua_deployment_test ws2_32)
         endif()
         foreach(case IN ITEMS
+            input_writing_is_explicit_and_separate_from_publication
             endpoint_start_publishes_no_components
             explicit_complete_deployer_publication
             explicit_selected_deployer_publication
