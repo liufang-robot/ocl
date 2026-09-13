@@ -310,18 +310,24 @@ public:
     rl_line_buffer = line.data();
     rl_point = static_cast<int>(line.size());
     BOOST_REQUIRE(rl_attempted_completion_function != nullptr);
+    std::cerr << "[DEBUG-ocl-completion] invoke " << line << std::endl;
     char **matches = rl_attempted_completion_function(line.c_str(), 0, rl_point);
+    std::cerr << "[DEBUG-ocl-completion] callback returned" << std::endl;
     std::set<std::string> result;
     if (matches) {
       // A sole match occupies element zero; otherwise it is the common prefix.
       if (!matches[1]) result.insert(matches[0]);
       for (std::size_t i = 1; matches[i]; ++i) {
         result.insert(matches[i]);
+        std::cerr << "[DEBUG-ocl-completion] release candidate " << i << std::endl;
         std::free(matches[i]);
       }
+      std::cerr << "[DEBUG-ocl-completion] release prefix" << std::endl;
       std::free(matches[0]);
+      std::cerr << "[DEBUG-ocl-completion] release array" << std::endl;
       std::free(matches);
     }
+    std::cerr << "[DEBUG-ocl-completion] cleanup complete" << std::endl;
     return result;
   }
 #endif

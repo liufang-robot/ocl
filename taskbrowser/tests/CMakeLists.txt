@@ -32,6 +32,6 @@ IF(BUILD_TESTING)
     taskbrowser_value_renderer_test
     PROPERTIES
       ENVIRONMENT
-        "ORO_TB_HISTFILE=${CMAKE_CURRENT_BINARY_DIR}/taskbrowser-value-renderer.history"
+        "ORO_TB_HISTFILE=${CMAKE_CURRENT_BINARY_DIR}/taskbrowser-value-renderer.history;BOOST_TEST_LOG_LEVEL=test_suite"
   )
 ENDIF()
