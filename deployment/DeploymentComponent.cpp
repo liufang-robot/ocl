@@ -185,14 +185,6 @@ namespace OCL
         this->addOperation("connectPeers", cp, this, ClientThread).doc("Connect two Components known to this Component.").arg("One", "The first component.").arg("Two", "The second component.");
         cp = &DeploymentComponent::connectPorts;
         this->addOperation("connectPorts", cp, this, ClientThread).doc("DEPRECATED. Connect the Data Ports of two Components known to this Component.").arg("One", "The first component.").arg("Two", "The second component.");
-        typedef bool(DeploymentComponent::*DC4Fun)(const std::string&, const std::string&,
-                                                   const std::string&, const std::string&);
-        DC4Fun cp4 = &DeploymentComponent::connectPorts;
-        this->addOperation("connectTwoPorts", cp4, this, ClientThread).doc("DEPRECATED. Connect two ports of Components known to this Component.")
-                .arg("One", "The first component.")
-                .arg("PortOne", "The port name of the first component.")
-                .arg("Two", "The second component.")
-                .arg("PortTwo", "The port name of the second component.");
         this->addOperation("createStream", &DeploymentComponent::createStream, this, ClientThread).doc("DEPRECATED. Creates a stream to or from a port.")
                 .arg("component", "The component which owns 'port'.")
                 .arg("port", "The port to create a stream from or to.")
@@ -699,51 +691,6 @@ namespace OCL
         }
 
         return a->connectPorts(b);
-    }
-
-    bool DeploymentComponent::connectPorts(const std::string& one, const std::string& one_port,
-                                           const std::string& other, const std::string& other_port)
-    {
-		Service::shared_ptr a,b;
-		a = stringToService(one);
-		b = stringToService(other);
-		if (!a || !b)
-			return false;
-        base::PortInterface* ap, *bp;
-        ap = a->getPort(one_port);
-        bp = b->getPort(other_port);
-        if ( !ap ) {
-            Logger::log().logf(Logger::Error, "DeploymentComponent::connectPorts",
-                               "%s does not have a port %s", one.c_str(), one_port.c_str());
-            return false;
-        }
-        if ( !bp ) {
-            Logger::log().logf(Logger::Error, "DeploymentComponent::connectPorts",
-                               "%s does not have a port %s", other.c_str(), other_port.c_str());
-            return false;
-        }
-
-        // Warn about already connected ports.
-        if ( ap->connected() && bp->connected() ) {
-            Logger::log().logf(Logger::Debug, "DeploymentComponent::connectPorts",
-                               "Port '%s' of Component '%s' and port '%s' of Component '%s' are already connected but (probably) not to each other. Connecting them anyway.",
-                               ap->getName().c_str(), a->getName().c_str(),
-                               bp->getName().c_str(), b->getName().c_str());
-        }
-
-        // use the base::PortInterface implementation
-        if ( ap->connectTo( bp ) ) {
-            // all went fine.
-            Logger::log().logf(Logger::Info, "DeploymentComponent::connectPorts",
-                               "Connected Port %s.%s to  %s.%s.",
-                               one.c_str(), one_port.c_str(), other.c_str(), other_port.c_str());
-            return true;
-        } else {
-            Logger::log().logf(Logger::Error, "DeploymentComponent::connectPorts",
-                               "Failed to connect Port %s.%s to  %s.%s.",
-                               one.c_str(), one_port.c_str(), other.c_str(), other_port.c_str());
-            return true;
-        }
     }
 
     bool DeploymentComponent::createStream(const std::string& comp, const std::string& port, ConnPolicy policy)

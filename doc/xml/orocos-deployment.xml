@@ -713,6 +713,15 @@
 	  </note>
 	</para>
 	<para>
+      Use <function>connectPort("Plant.Position", "Controller.SensorValues")</function>
+      to connect a whole output value to a matching input. Include any nested
+      services in the port paths, for example
+      <function>connectPort("Plant.motion.io.Position", "Controller.io.SensorValues")</function>.
+      This replaces the removed <function>connectTwoPorts</function> operation
+      and the four-argument C++ <function>connectPorts</function> overload.
+      Specify the output endpoint first and the input endpoint second.
+    </para>
+	<para>
 		In scripting, you can use the <function>ConnPolicy</function> struct
 		for connecting ports. For example:
 		<programlisting>  var ConnPolicy cp

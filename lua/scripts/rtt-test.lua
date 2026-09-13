@@ -153,11 +153,9 @@ function test_ports()
 
    depl = TC:getPeer("Deployer")
    print("connecting ports: ",
-	 depl:call("connectTwoPorts",
-		   var.new("String", "lua"),
-		   var.new("String", "outport1"),
-		   var.new("String", "lua"),
-		   var.new("String", "inport1")))
+	 depl:getOperation("connectPort")(
+		   var.new("String", "lua.outport1"),
+		   var.new("String", "lua.inport1")))
 
    local res = var.new("String")
 

@@ -130,8 +130,9 @@ int ORO_main(int, char**) {
         Producer producer; Scalar scalar; Consumer consumer;
         OCL::DeploymentComponent deployer("cyclic_deployer");
         deployer.addPeer(&producer); deployer.addPeer(&scalar); deployer.addPeer(&consumer);
-        for (const auto* operation : {"connectPort", "connectMember", "finalizeConnections"})
+        for (const auto* operation : {"connect", "connectPorts", "connectPort", "connectMember", "finalizeConnections"})
             require(deployer.provides()->hasOperation(operation), "missing cyclic deployment operation");
+        require(!deployer.provides()->hasOperation("connectTwoPorts"), "removed connectTwoPorts operation remains available");
         require(deployer.runScript(OCL_CYCLIC_CONNECTION_SCRIPT), "real deployment script");
         require(!deployer.connectMember("Source.motion.io.sample", "y", "Sink.fused", "x"), "reject duplicate writer");
         require(!deployer.connectMember("Source.motion.io.sample", "missing", "Sink.fused", "x"), "reject unknown member");
