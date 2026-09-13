@@ -13,6 +13,8 @@
 #define BOOST_TEST_MODULE ocl_opcua_deployment
 #include <boost/test/included/unit_test.hpp>
 
+#include <rtt/internal/PortDataAccess.hpp>
+#include <rtt/extras/SlaveActivity.hpp>
 #include "deployment/OpcUaDeploymentComponent.hpp"
 
 #include <rtt/InputPort.hpp>
@@ -354,6 +356,14 @@ public:
     control->addPort(service_command);
     control->addPort(service_feedback);
     BOOST_REQUIRE(provides()->addService(control));
+  }
+
+  void cycle() {
+    if (!getActivity() || !dynamic_cast<RTT::extras::SlaveActivity*>(getActivity()))
+      setActivity(new RTT::extras::SlaveActivity(0.01));
+    BOOST_REQUIRE(start());
+    BOOST_REQUIRE(getActivity()->execute());
+    BOOST_REQUIRE(stop());
   }
 
   ~CompleteMappingTask() override {
@@ -878,7 +888,7 @@ BOOST_AUTO_TEST_CASE(strict_publication_is_static_and_idempotent) {
   BOOST_REQUIRE(::opcua::services::readNodeClass(
       client,
       modelNodeId(namespace_index, {"components", "CompleteMapping", "services",
-                                    "Command", "operations", "read"})));
+                                    "Command", "operations", "status"})));
   for (const std::string_view category :
        {"properties", "attributes", "ports", "services"}) {
     requireMissingNode(client, modelNodeId(namespace_index,
@@ -899,7 +909,9 @@ BOOST_AUTO_TEST_CASE(strict_publication_is_static_and_idempotent) {
                  .isGood());
   std::int32_t direct_command_value = 0;
   BOOST_REQUIRE(waitUntil([&] {
-    return complete.command.read(direct_command_value) == RTT::NewData;
+    complete.cycle();
+    direct_command_value = complete.command.data();
+    return complete.command.status() == RTT::NewData;
   }));
   BOOST_TEST(direct_command_value == 61);
   BOOST_TEST(::opcua::services::readValue(client, command_value_id)
@@ -909,13 +921,15 @@ BOOST_AUTO_TEST_CASE(strict_publication_is_static_and_idempotent) {
                                            ::opcua::Variant(std::int32_t{61}))
                  .isGood());
   BOOST_REQUIRE(waitUntil([&] {
-    return complete.command.read(direct_command_value) == RTT::NewData;
+    complete.cycle();
+    direct_command_value = complete.command.data();
+    return complete.command.status() == RTT::NewData;
   }));
   BOOST_TEST(direct_command_value == 61);
 
-  BOOST_TEST(complete.feedback.write(std::int32_t{81}) == RTT::WriteSuccess);
-  BOOST_TEST(complete.feedback.write(std::int32_t{82}) == RTT::WriteSuccess);
-  BOOST_TEST(complete.feedback.write(std::int32_t{84}) == RTT::WriteSuccess);
+  complete.feedback.data() = 81; complete.cycle();
+  complete.feedback.data() = 82; complete.cycle();
+  complete.feedback.data() = 84; complete.cycle();
   const auto feedback_value_id =
       modelNodeId(namespace_index, {"components", "CompleteMapping", "ports",
                                     "Feedback", "value"});
@@ -980,18 +994,19 @@ BOOST_AUTO_TEST_CASE(strict_publication_is_static_and_idempotent) {
   BOOST_REQUIRE(command_service);
   BOOST_REQUIRE(trigger_service);
   BOOST_REQUIRE(feedback_service);
-  BOOST_REQUIRE(command_service->getOperation("read") != nullptr);
-  BOOST_REQUIRE(trigger_service->getOperation("read") != nullptr);
-  BOOST_REQUIRE(feedback_service->getOperation("last") != nullptr);
+  BOOST_REQUIRE(command_service->getOperation("status") != nullptr);
+  BOOST_REQUIRE(trigger_service->getOperation("status") != nullptr);
+  BOOST_REQUIRE(feedback_service->getOperation("snapshot") != nullptr);
 
   RTT::OutputPort<std::int32_t> command_source("CommandSource");
   BOOST_REQUIRE(command_source.createConnection(
       *remote_command,
       RTT::ConnPolicy::data(RTT::ConnPolicy::LOCK_FREE, false)));
-  BOOST_TEST(command_source.write(std::int32_t{73}) == RTT::WriteSuccess);
+  BOOST_TEST(RTT::internal::PortDataAccess::publish(command_source, std::int32_t{73}) == RTT::WriteSuccess);
   std::int32_t command_value = 0;
   BOOST_REQUIRE(waitUntil(
-      [&] { return complete.command.read(command_value) == RTT::NewData; }));
+      [&] { complete.cycle(); command_value = complete.command.data();
+            return complete.command.status() == RTT::NewData; }));
   BOOST_TEST(command_value == 73);
 
   RTT::InputPort<std::int32_t> feedback_sink("FeedbackSink");
@@ -999,10 +1014,10 @@ BOOST_AUTO_TEST_CASE(strict_publication_is_static_and_idempotent) {
       feedback_sink, RTT::ConnPolicy::data(RTT::ConnPolicy::LOCK_FREE, false)));
   std::int32_t feedback_value = 0;
   BOOST_REQUIRE(waitUntil(
-      [&] { return feedback_sink.read(feedback_value) == RTT::NewData; }));
+      [&] { return RTT::internal::PortDataAccess::receive(feedback_sink, feedback_value) == RTT::NewData; }));
   BOOST_TEST(feedback_value == 84);
   RTT::OperationCaller<std::int32_t()> last =
-      feedback_service->getOperation("last");
+      feedback_service->getOperation("snapshot");
   BOOST_REQUIRE(last.ready());
   BOOST_TEST(last() == 84);
 
@@ -1039,11 +1054,10 @@ BOOST_AUTO_TEST_CASE(strict_publication_is_static_and_idempotent) {
   BOOST_REQUIRE(remote_service_feedback->createConnection(
       service_feedback_sink,
       RTT::ConnPolicy::data(RTT::ConnPolicy::LOCK_FREE, false)));
-  BOOST_TEST(complete.service_feedback.write(std::int32_t{91}) ==
-             RTT::WriteSuccess);
+  complete.service_feedback.data() = 91; complete.cycle();
   std::int32_t service_feedback_value = 0;
   BOOST_REQUIRE(waitUntil([&] {
-    return service_feedback_sink.read(service_feedback_value) == RTT::NewData;
+    return RTT::internal::PortDataAccess::receive(service_feedback_sink, service_feedback_value) == RTT::NewData;
   }));
   BOOST_TEST(service_feedback_value == 91);
 

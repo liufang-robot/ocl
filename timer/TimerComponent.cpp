@@ -11,9 +11,11 @@ namespace OCL
     using namespace std;
     using namespace RTT;
 
+    const unsigned TimerComponent::TimerCount;
+
     TimerComponent::TimerComponent( std::string name /*= "os::Timer" */ )
-        : TaskContext( name, PreOperational ), port_timers(32), mtimeoutEvent("timeout"),
-          mtimer( port_timers, mtimeoutEvent, name ),
+        : TaskContext( name, PreOperational ), port_timers(TimerCount), mtimeoutEvent("timeout"),
+          mtimer( *this, name ),
           waitForCommand( "waitFor", &TimerComponent::waitFor, this), //, &TimerComponent::isTimerExpired, this),
           waitCommand( "wait", &TimerComponent::wait, this) //&TimerComponent::isTimerExpired, this)
     {
@@ -25,22 +27,32 @@ namespace OCL
         this->addOperation("startTimer", &os::Timer::startTimer , &mtimer, RTT::ClientThread).doc("Start a periodic timer.").arg("timerId", "A numeric id of the timer to start.").arg("period", "The period in seconds.");
         this->addOperation("killTimer", &os::Timer::killTimer , &mtimer, RTT::ClientThread).doc("Kill (disable) an armed or started timer.").arg("timerId", "A numeric id of the timer to kill.");
         this->addOperation("isArmed", &os::Timer::isArmed , &mtimer, RTT::ClientThread).doc("Check if a given timer is armed or started.").arg("timerId", "A numeric id of the timer to check.");
-        this->addOperation("setMaxTimers", &os::Timer::setMaxTimers , &mtimer, RTT::ClientThread).doc("Raise or lower the maximum amount of timers.").arg("timers", "The largest amount of timers. The highest timerId is max-1.");
+        this->addOperation("setMaxTimers", &TimerComponent::setMaxTimers , this, RTT::ClientThread).doc("Set the number of enabled timers while stopped, up to 32.").arg("timers", "The largest amount of timers. The highest timerId is max-1.");
         this->addOperation( waitForCommand ).doc("Wait until a timer expires.").arg("timerId", "A numeric id of the timer to wait for.");
         this->addOperation( waitCommand ).doc("Arm and wait until that timer expires.").arg("timerId", "A numeric id of the timer to arm and to wait for.").arg("delay", "The delay in seconds before the timer expires.");
-        this->addPort(mtimeoutEvent).doc("This port is written each time ANY timer expires. The timer id is the value sent in this port. This port is for backwards compatibility only. It is advised to use the timer_* ports.");
+        this->addPort(mtimeoutEvent).doc("Cumulative count of all timer expirations, modulo 2^64, sampled at component cycle boundaries.");
         for(unsigned int i=0;i<port_timers.size();i++){
             ostringstream port_name;
             port_name<<"timer_"<<i;
-            port_timers[i] = new RTT::OutputPort<RTT::os::Timer::TimerId>(port_name.str());
-            this->addPort(*(port_timers[i])).doc(string("This port is written each time ")+port_name.str()+string(" expires. The timer id is the value sent in this port."));
+            port_timers[i] = new RTT::OutputPort<ExpirationCount>(port_name.str());
+            this->addPort(*(port_timers[i])).doc(string("Cumulative expiration count, modulo 2^64, for ")+port_name.str());
         }
     }
 
     TimerComponent::~TimerComponent() {
         this->stop();
+        // os::Timer starts its worker during construction, including when this
+        // component was never started. Join callbacks before releasing ports.
+        if (mtimer.getThread()) mtimer.getThread()->stop();
         for(unsigned int i=0;i<port_timers.size();i++)
             delete port_timers[i];
+    }
+
+    bool TimerComponent::setMaxTimers(unsigned int count)
+    {
+        if (isRunning() || count > TimerCount) return false;
+        mtimer.setMaxTimers(count);
+        return true;
     }
 
     bool TimerComponent::startHook()
@@ -50,7 +62,13 @@ namespace OCL
 
     void TimerComponent::updateHook()
     {
-        // nop, we just process the wait commands.
+        ExpirationCount total = 0;
+        for (unsigned i = 0; i != TimerCount; ++i) {
+            const ExpirationCount count = mtimer.counts[i].load(std::memory_order_relaxed);
+            port_timers[i]->data() = count;
+            total += count;
+        }
+        mtimeoutEvent.data() = total;
     }
 
     void TimerComponent::stopHook()

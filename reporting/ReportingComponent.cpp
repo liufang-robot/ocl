@@ -54,7 +54,7 @@ namespace OCL
     //! We use this to track changes in sizes for our sequences, which will lead to a rebuild.
     class CheckSizeDataSource : public ValueDataSource<bool>
     {
-        mutable int msize;
+        const int msize;
         DataSource<int>::shared_ptr mds;
         DataSource<bool>::shared_ptr mupstream;
     public:
@@ -62,19 +62,14 @@ namespace OCL
             : msize(size), mds(ds), mupstream(upstream)
         {}
         /**
-         * Returns true if the size or the upstream size remained the same.
+         * Returns true when this size and every upstream size remain unchanged.
          */
         bool get() const{
             // it's very important to first check upstream, because
             // if upstream changed size, downstream might already be corrupt !
             // (downstream will be corrupt upon capacity changes upstream)
-            bool result = true;
-            if (mupstream)
-                result = (mupstream->get() && msize == mds->get());
-            else
-                result = (msize == mds->get());
-            msize = mds->get();
-            return result;
+            if (mupstream && !mupstream->get()) return false;
+            return msize == mds->get();
         }
     };
 
@@ -151,10 +146,10 @@ namespace OCL
         DataSource<int>::shared_ptr size = DataSource<int>::narrow( dsb->getMember("size").get() );
         if (size) {
             int msize = size->get();
+            resized = new CheckSizeDataSource(msize, size, resized);
             for (int i=0; i < msize; ++i) {
                 string indx = boost::lexical_cast<string>( i );
                 DataSourceBase::shared_ptr item = dsb->getMember(indx);
-                resized = new CheckSizeDataSource( msize, size, resized );
                 if (item) {
                     if ( !item->isAssignable() ) {
                         // For example: the case for size() and capacity() in SequenceTypeInfo
@@ -193,12 +188,11 @@ namespace OCL
           insnapshot("Snapshot","Set to true to enable snapshot mode. This will cause a non-periodic reporter to only report data upon the snapshot() operation.",false),
           synchronize_with_logging("Synchronize","Set to true if the timestamp should be synchronized with the logging",false),
           report_data("ReportData","A PropertyBag which defines which ports or components to report."),
-          report_policy( ConnPolicy::data(ConnPolicy::LOCK_FREE,true,false) ),
           onlyNewData(false),
           starttime(0),
           timestamp("TimeStamp","The time at which the data was read.",0.0)
     {
-        this->provides()->doc("Captures data on data ports. A periodic reporter will sample each added port according to its period, a non-periodic reporter will write out data as it comes in, or only during a snapshot() if the Snapshot property is true.");
+        this->provides()->doc("Observes committed output snapshots once per reporter cycle. Configure a periodic activity or request snapshot() explicitly. Samples between observations may coalesce.");
 
         this->properties()->addProperty( writeHeader );
         this->properties()->addProperty( decompose );
@@ -206,7 +200,6 @@ namespace OCL
         this->properties()->addProperty( insnapshot );
         this->properties()->addProperty( synchronize_with_logging);
         this->properties()->addProperty( report_data);
-        this->properties()->addProperty( "ReportPolicy", report_policy).doc("The ConnPolicy for the reporter's port connections.");
         this->properties()->addProperty( "ReportOnlyNewData", onlyNewData).doc("Turn on in order to only write out NewData on ports and omit unchanged ports. Turn off in order to sample and write out all ports (even old data).");
         // Add the methods, methods make sure that they are
         // executed in the context of the (non realtime) caller.
@@ -225,10 +218,16 @@ namespace OCL
     ReportingComponent::~ReportingComponent() {}
 
 
+    bool ReportingComponent::reportChangeAllowed() const
+    {
+        return !base::TaskCore::isRunning() && base::TaskCore::getTargetState() < base::TaskCore::Running;
+    }
+
     bool ReportingComponent::addMarshaller( marsh::MarshallInterface* headerM, marsh::MarshallInterface* bodyM)
     {
         boost::shared_ptr<marsh::MarshallInterface> header(headerM);
         boost::shared_ptr<marsh::MarshallInterface> body(bodyM);
+        if (!reportChangeAllowed()) return false;
         if ( !header && !body)
             return false;
         if ( !header )
@@ -242,6 +241,7 @@ namespace OCL
 
     bool ReportingComponent::removeMarshallers()
     {
+        if (!reportChangeAllowed()) return false;
         marshallers.clear();
         return true;
     }
@@ -360,6 +360,7 @@ namespace OCL
     }
 
     bool ReportingComponent::reportComponent( const std::string& component ) {
+        if (!reportChangeAllowed()) return false;
         // Users may add own data sources, so avoid duplicates
         //std::vector<std::string> sources                = comp->data()->getNames();
         TaskContext* comp = this->getPeer(component);
@@ -382,6 +383,7 @@ namespace OCL
 
 
     bool ReportingComponent::unreportComponent( const std::string& component ) {
+        if (!reportChangeAllowed()) return false;
         TaskContext* comp = this->getPeer(component);
         if ( !comp ) {
             Logger::log().logf(Logger::Error, "ReportingComponent::unreportComponent",
@@ -402,13 +404,9 @@ namespace OCL
 
     // report a specific connection.
     bool ReportingComponent::reportPort(const std::string& component, const std::string& port ) {
+        if (!reportChangeAllowed()) return false;
         TaskContext* comp = this->getPeer(component);
-        if ( this->ports()->getPort(component +"_"+port) ) {
-            Logger::log().logf(Logger::Warning, "ReportingComponent::reportPort",
-                               "Already reporting %s.%s: removing old port first.",
-                               component.c_str(), port.c_str());
-            this->unreportPort(component,port);
-        }
+        this->unreportDataSource(component + "." + port);
         if ( !comp ) {
             Logger::log().logf(Logger::Error, "ReportingComponent::reportPort",
                                "Could not report Component %s : no such peer.",
@@ -449,44 +447,10 @@ namespace OCL
                                porti->getName().c_str(), component.c_str());
             return false;
         }
-            // create new port temporarily
-        // this port is only created with the purpose of
-        // creating a connection object.
-        base::PortInterface* ourport = porti->antiClone();
-        assert(ourport);
-        ourport->setName(component + "_" + port);
-        ipi = dynamic_cast<base::InputPortInterface*> (ourport);
-        assert(ipi);
-
-        if (report_policy.type == ConnPolicy::DATA ) {
-            Logger::log().logf(Logger::Info, "ReportingComponent::reportPort",
-                               "Not buffering of data flow connections. You may miss samples.");
-        } else {
-            Logger::log().logf(Logger::Info, "ReportingComponent::reportPort",
-                               "Buffering ports with size %d, as set in ReportPolicy property.",
-                               report_policy.size);
-        }
-
-        this->ports()->addEventPort( *ipi );
-        if (porti->connectTo(ourport, report_policy ) == false)
-        {
-            Logger::log().logf(Logger::Error, "ReportingComponent::reportPort",
-                               "Could not connect to OutputPort %s",
-                               porti->getName().c_str());
-            this->ports()->removePort(ourport->getName());
-            delete ourport; // XXX/TODO We're leaking ourport !
+        base::OutputPortInterface* output = dynamic_cast<base::OutputPortInterface*>(porti);
+        if (!output || !this->reportDataSource(component + "." + port, "Port",
+                                               output->getDataSource(), 0, true))
             return false;
-        }
-
-        if (this->reportDataSource(component + "." + port, "Port",
-                                   ipi->getDataSource(),ipi, true) == false)
-        {
-            Logger::log().logf(Logger::Error, "ReportingComponent::reportPort",
-                               "Failed reporting port %s", port.c_str());
-            this->ports()->removePort(ourport->getName());
-            delete ourport;
-            return false;
-        }
 
         Logger::log().logf(Logger::Info, "ReportingComponent::reportPort",
                            "Monitoring OutputPort %s : ok.", port.c_str());
@@ -497,18 +461,17 @@ namespace OCL
     }
 
     bool ReportingComponent::unreportPort(const std::string& component, const std::string& port ) {
-        base::PortInterface* ourport = this->ports()->getPort(component + "_" + port);
-        if ( this->unreportDataSource( component + "." + port ) && report_data.value().removeProperty( report_data.value().findValue<string>(component+"."+port))) {
-            this->ports()->removePort(ourport->getName());
-            delete ourport; // also deletes datasource.
-            return true;
-        }
-        return false;
+        if (!reportChangeAllowed()) return false;
+        const bool removed = this->unreportDataSource(component + "." + port);
+        base::PropertyBase* entry = report_data.value().findValue<string>(component + "." + port);
+        if (entry) report_data.value().removeProperty(entry);
+        return removed;
     }
 
     // report a specific datasource, property,...
     bool ReportingComponent::reportData(const std::string& component,const std::string& dataname)
     {
+        if (!reportChangeAllowed()) return false;
         TaskContext* comp = this->getPeer(component);
         if ( !comp ) {
             Logger::log().logf(Logger::Error, "ReportingComponent::reportData",
@@ -543,11 +506,13 @@ namespace OCL
     }
 
     bool ReportingComponent::unreportData(const std::string& component,const std::string& datasource) {
+        if (!reportChangeAllowed()) return false;
         return this->unreportDataSource( component +"." + datasource) && report_data.value().removeProperty( report_data.value().findValue<string>(component+"."+datasource));
     }
 
     bool ReportingComponent::reportDataSource(std::string tag, std::string type, base::DataSourceBase::shared_ptr orig, base::InputPortInterface* ipi, bool track)
     {
+        if (!reportChangeAllowed()) return false;
         // check for duplicates:
         for (Reports::iterator it = root.begin();
              it != root.end(); ++it)
@@ -557,6 +522,7 @@ namespace OCL
 
         // creates a copy of the data and an update command to
         // update the copy from the original.
+        if (!orig) return false;
         base::DataSourceBase::shared_ptr clone = orig->getTypeInfo()->buildValue();
         if ( !clone ) {
             Logger::log().logf(Logger::Error, "ReportingComponent::reportDataSource",
@@ -564,12 +530,13 @@ namespace OCL
             return false;
         }
         PropertyBase* prop = 0;
-        root.push_back( boost::make_tuple( tag, orig, type, prop, ipi, false, track ) );
+        root.push_back( boost::make_tuple( tag, clone, type, prop, ipi, false, track, orig ) );
         return true;
     }
 
     bool ReportingComponent::unreportDataSource(std::string tag)
     {
+        if (!reportChangeAllowed()) return false;
         for (Reports::iterator it = root.begin();
              it != root.end(); ++it)
             if ( it->get<T_QualName>() == tag ) {
@@ -612,17 +579,6 @@ namespace OCL
             }
         }
 
-        // Turn off port triggering in snapshot mode, and vice versa.
-        // Also clears any old data in the buffers
-        for(Reports::iterator it = root.begin(); it != root.end(); ++it )
-            if ( it->get<T_Port>() ) {
-#ifndef ORO_SIGNALLING_PORTS
-                it->get<T_Port>()->signalInterface( !insnapshot.get() );
-#endif
-                it->get<T_Port>()->clear();
-            }
-
-
         snapshotted = false;
         return true;
     }
@@ -638,11 +594,13 @@ namespace OCL
     bool ReportingComponent::copydata() {
         timestamp = os::TimeService::Instance()->secondsSince( starttime );
 
-        // result will become true if more data is to be read.
+        // Each observer evaluates one committed snapshot per report.
         bool result = false;
-        // This evaluates the InputPortDataSource evaluate() returns true upon new data.
+        // Observer freshness is independent of component input subscriptions.
         for(Reports::iterator it = root.begin(); it != root.end(); ++it ) {
-            it->get<T_NewData>() = (it->get<T_PortDS>())->evaluate(); // stores 'NewData' flag.
+            // update evaluates the observer exactly once and retains the owned
+            // value when no new committed sample exists.
+            it->get<T_NewData>() = it->get<T_PortDS>()->update(it->get<T_Observer>().get());
             // if its a property/attr, get<T_NewData> will always be true, so we override (clear) with get<T_Tracked>.
             result = result || ( it->get<T_NewData>() && it->get<T_Tracked>() );
         }
@@ -651,7 +609,7 @@ namespace OCL
 
     void ReportingComponent::makeReport2()
     {
-        // Uses the port DS itself to make the report.
+        // Bind decomposition to reporter-owned assignable values.
         assert( report.empty() );
         // For the timestamp, we need to add a new property object:
         report.add( timestamp.getTypeInfo()->buildProperty( timestamp.getName(), "", timestamp.getDataSource() ) );
@@ -699,15 +657,16 @@ namespace OCL
         else
             snapshotted = false;
 
+        copydata();
+
         // if any data sequence got resized, we rebuild the whole bunch.
         // otherwise, we need to track every individual array (not impossible though, but still needs an upstream concept).
         if ( mchecker && mchecker->get() == false ) {
             cleanReport();
             makeReport2();
-        } else
-            copydata();
+        }
 
-        do {
+        {
             // Step 3: print out the result
             // write out to all marshallers
             for(Marshallers::iterator it=marshallers.begin(); it != marshallers.end(); ++it) {
@@ -727,7 +686,7 @@ namespace OCL
                 }
                 it->second->flush();
             }
-        } while( !getActivity()->isPeriodic() && !insnapshot.get() && copydata() ); // repeat if necessary. In periodic mode we always only sample once.
+        }
     }
 
     void ReportingComponent::stopHook() {

@@ -1,0 +1,6 @@
+connectMember("Source.motion.io.sample", "y", "Sink.fused", "x")
+connectMember("Scalar.value", "", "Sink.fused", "y")
+connectPort("Source.motion.io.sample", "Sink.copy")
+connectMember("Source.motion.io.sample", "", "Sink.nested", "sample")
+connectMember("Source.nested", "sample", "Sink.selected", "")
+finalizeConnections()

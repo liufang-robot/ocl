@@ -153,19 +153,17 @@ function test_ports()
 
    depl = TC:getPeer("Deployer")
    print("connecting ports: ",
-	 depl:call("connectTwoPorts",
-		   var.new("String", "lua"),
-		   var.new("String", "outport1"),
-		   var.new("String", "lua"),
-		   var.new("String", "inport1")))
+	 depl:getOperation("connectPort")(
+		   var.new("String", "lua.outport1"),
+		   var.new("String", "lua.inport1")))
 
    local res = var.new("String")
 
    for i=1,10 do
       local mes = "data_" .. tostring(i)
       print("writing... " .. mes)
-      op:write(var.new("String", mes))
-      ip:read(res)
+      op:data(var.new("String", mes))
+      res:assign(ip:data())
       print("reading... " .. tostring(res))
    end
 end

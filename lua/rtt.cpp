@@ -32,6 +32,11 @@
  * Suite 330, Boston, MA  02111-1307  USA
  */
 
+#include <rtt/internal/PortDataAccess.hpp>
+#include <rtt/base/ActionInterface.hpp>
+#include <memory>
+#include <rtt/DataFlowInterface.hpp>
+#include <rtt/ExecutionEngine.hpp>
 #include "rtt.hpp"
 
 #include <cstdint>
@@ -45,6 +50,9 @@ using namespace RTT::base;
 using namespace RTT::internal;
 
 static TaskContext* __getTC(lua_State*);
+// Native lifecycle hooks may execute in the thread invoking start()/stop().
+// Scope permission to the exact component and native hook call on this thread.
+static thread_local TaskContext* image_hook_owner = NULL;
 
 #define DEBUG
 
@@ -1217,8 +1225,6 @@ static int Port_connect(lua_State *L)
 	PortInterface **pip1, **pip2;
 	PortInterface *pi1 = NULL;
 	PortInterface *pi2 = NULL;
-	ConnPolicy **cpp;
-	ConnPolicy *cp = NULL;
 
 	if((pip1 = (PortInterface**) luaL_testudata(L, 1, "InputPort")) != NULL) {
 		pi1= *pip1;
@@ -1241,14 +1247,19 @@ static int Port_connect(lua_State *L)
 			   lua_typename(L, arg_type));
 	}
 
-	if((cpp = (ConnPolicy**) luaL_testudata(L, 3, "ConnPolicy")) != NULL) {
-		cp=*cpp;
-	}
-
-	if ( cp )
-		ret = pi1->connectTo(pi2, *cp);
-	else
+	if (lua_gettop(L) > 2) {
+		DataSourceBase::shared_ptr* value = luaM_testudata_mt(L, 3, "Variable", DataSourceBase::shared_ptr);
+		DataSource<ConnPolicy>* policy = value ? DataSource<ConnPolicy>::narrow(value->get()) : NULL;
+		if (!policy)
+			return luaL_error(L, "Port.connect: argument 3 must be a ConnPolicy Variable");
+		if (!policy->evaluate())
+			return luaL_error(L, "Port.connect: cannot evaluate the connection policy");
+		if (policy->rvalue().type != ConnPolicy::DATA)
+			return luaL_error(L, "Port.connect: data ports require DATA (0); FIFO and circular-buffer modes were removed");
+		ret = pi1->connectTo(pi2, policy->get());
+	} else {
 		ret = pi1->connectTo(pi2);
+	}
 
 	lua_pushboolean(L, ret);
 
@@ -1321,33 +1332,42 @@ static int InputPort_new(lua_State *L)
 	return 1;
 }
 
-static int InputPort_read(lua_State *L)
+static void requireImageAccess(lua_State* L, PortInterface* port)
 {
-	int ret = 1;
-	InputPortInterface *ip = *(luaM_checkudata_mt_bx(L, 1, "InputPort", InputPortInterface));
-	DataSourceBase::shared_ptr dsb;
-	DataSourceBase::shared_ptr *dsbp;
-	FlowStatus fs;
+    TaskContext* owner = port->getInterface() ? port->getInterface()->getOwner() : NULL;
+    if (owner && (owner->base::TaskCore::isRunning() ||
+                  owner->base::TaskCore::getTargetState() >= RTT::base::TaskCore::Running) &&
+        (owner != __getTC(L) || (!owner->engine()->isSelf() && image_hook_owner != owner)))
+        luaL_error(L, "Port.data: running process images are accessible only in their owner's execution context");
+}
 
-	/* if we get don't get a DS to store the result, create one */
-	if ((dsbp = luaM_testudata_mt(L, 2, "Variable", DataSourceBase::shared_ptr)) != NULL)
-		dsb = *dsbp;
-	else {
-		dsb = ip->getTypeInfo()->buildValue();
-		ret = 2;
-	}
+static int pushImageCopy(lua_State* L, DataSourceBase::shared_ptr image)
+{
+    if (!image) return luaL_error(L, "Port.data: no local process image or snapshot is available");
+    DataSourceBase::shared_ptr copy = image->getTypeInfo()->buildValue();
+    if (!copy) return luaL_error(L, "Port.data: cannot allocate the typed value");
+    std::unique_ptr<RTT::base::ActionInterface> assignment(copy->updateAction(image.get()));
+    if (!assignment || !assignment->execute())
+        return luaL_error(L, "Port.data: cannot copy the typed process image");
+    Variable_push_coerce(L, copy);
+    return 1;
+}
 
-	fs = ip->read(dsb);
+static int InputPort_data(lua_State *L)
+{
+    InputPortInterface* ip = *(luaM_checkudata_mt_bx(L, 1, "InputPort", InputPortInterface));
+    if (lua_gettop(L) != 1)
+        return luaL_error(L, "InputPort.data: the input image is read-only");
+    requireImageAccess(L, ip);
+    return pushImageCopy(L, RTT::internal::PortDataAccess::image(*ip));
+}
 
-	if(fs == NoData) lua_pushstring(L, "NoData");
-	else if (fs == NewData) lua_pushstring(L, "NewData");
-	else if (fs == OldData) lua_pushstring(L, "OldData");
-	else luaL_error(L, "InputPort.read: unknown FlowStatus returned");
-
-	if(ret>1)
-		Variable_push_coerce(L, dsb);
-
-	return ret;
+static int InputPort_status(lua_State *L)
+{
+    InputPortInterface* ip = *(luaM_checkudata_mt_bx(L, 1, "InputPort", InputPortInterface));
+    const FlowStatus status = ip->status();
+    lua_pushstring(L, status == NewData ? "NewData" : status == OldData ? "OldData" : "NoData");
+    return 1;
 }
 
 #ifdef NOT_USED_YET
@@ -1373,7 +1393,8 @@ static int InputPort_del(lua_State *L)
 
 static const struct luaL_Reg InputPort_f [] = {
 	{"new", InputPort_new },
-	{"read", InputPort_read },
+	{"data", InputPort_data },
+	{"status", InputPort_status },
 	{"info", Port_info },
 	{"connect", Port_connect },
 	{"disconnect", Port_disconnect },
@@ -1382,7 +1403,8 @@ static const struct luaL_Reg InputPort_f [] = {
 };
 
 static const struct luaL_Reg InputPort_m [] = {
-	{"read", InputPort_read },
+	{"data", InputPort_data },
+	{"status", InputPort_status },
 	{"info", Port_info },
 	{"delete", InputPort_del },
 	{"connect", Port_connect },
@@ -1423,22 +1445,27 @@ static int OutputPort_new(lua_State *L)
 	return 1;
 }
 
-static int OutputPort_write(lua_State *L)
+static int OutputPort_data(lua_State *L)
 {
-	DataSourceBase::shared_ptr dsb;
-	DataSourceBase::shared_ptr *dsbp;
+    OutputPortInterface* op = *(luaM_checkudata_mt_bx(L, 1, "OutputPort", OutputPortInterface));
+    requireImageAccess(L, op);
+    DataSourceBase::shared_ptr image = RTT::internal::PortDataAccess::image(*op);
+    if (!image) return luaL_error(L, "OutputPort.data: no local process image is available");
+    if (lua_gettop(L) == 1) return pushImageCopy(L, image);
+    DataSourceBase::shared_ptr* argument = luaM_testudata_mt(L, 2, "Variable", DataSourceBase::shared_ptr);
+    DataSourceBase::shared_ptr value = argument ? *argument : Variable_fromlua(L, op->getTypeInfo(), 2);
+    if (!value || value->getTypeInfo() != image->getTypeInfo() || !image->update(value.get()))
+        return luaL_error(L, "OutputPort.data: expected an exactly matching value type");
+    return 0;
+}
 
-	OutputPortInterface *op = *(luaM_checkudata_mt_bx(L, 1, "OutputPort", OutputPortInterface));
-
-	/* fastpath: Variable argument */
-	if ((dsbp = luaM_testudata_mt(L, 2, "Variable", DataSourceBase::shared_ptr)) != NULL) {
-		dsb = *dsbp;
-	} else  {
-		/* slowpath: convert lua value to dsb */
-		dsb = Variable_fromlua(L, op->getTypeInfo(), 2);
-	}
-	op->write(dsb);
-	return 0;
+static int OutputPort_snapshot(lua_State *L)
+{
+    OutputPortInterface* op = *(luaM_checkudata_mt_bx(L, 1, "OutputPort", OutputPortInterface));
+    DataSourceBase::shared_ptr snapshot = op->getDataSource();
+    if (!snapshot) return luaL_error(L, "OutputPort.snapshot: no snapshot codec is available");
+    snapshot->evaluate();
+    return pushImageCopy(L, snapshot);
 }
 
 #ifdef NOT_USED_YET
@@ -1464,7 +1491,8 @@ static int OutputPort_del(lua_State *L)
 
 static const struct luaL_Reg OutputPort_f [] = {
 	{"new", OutputPort_new },
-	{"write", OutputPort_write },
+	{"data", OutputPort_data },
+	{"snapshot", OutputPort_snapshot },
 	{"info", Port_info },
 	{"connect", Port_connect },
 	{"disconnect", Port_disconnect },
@@ -1473,7 +1501,8 @@ static const struct luaL_Reg OutputPort_f [] = {
 };
 
 static const struct luaL_Reg OutputPort_m [] = {
-	{"write", OutputPort_write },
+	{"data", OutputPort_data },
+	{"snapshot", OutputPort_snapshot },
 	{"info", Port_info },
 	{"connect", Port_connect },
 	{"disconnect", Port_disconnect },
@@ -3155,10 +3184,11 @@ int set_context_tc(TaskContext *tc, lua_State *L)
 /* call a zero arity function with a boolean return value
  * used to call various hooks */
 bool call_func(lua_State *L, const char *fname, TaskContext *tc,
-	       int require_function, int require_result)
+	       int require_function, int require_result, bool owner_hook)
 {
 	bool ret = true;
 	int num_res = (require_result != 0) ? 1 : 0;
+    int call_status;
 	lua_getglobal(L, fname);
 
 	if(lua_isnil(L, -1)) {
@@ -3169,7 +3199,17 @@ bool call_func(lua_State *L, const char *fname, TaskContext *tc,
 			goto out;
 	}
 
-	if (lua_pcall(L, 0, num_res, 0) != 0) {
+    {
+        struct HookOwnerScope {
+            TaskContext* previous;
+            explicit HookOwnerScope(TaskContext* owner) : previous(image_hook_owner) {
+                image_hook_owner = owner;
+            }
+            ~HookOwnerScope() { image_hook_owner = previous; }
+        } scope(owner_hook ? tc : image_hook_owner);
+        call_status = lua_pcall(L, 0, num_res, 0);
+    }
+	if (call_status != 0) {
 		const char* lua_error = lua_tostring(L, -1);
 		Logger::log().logf(Logger::Error, "LuaComponent",
 		                   "LuaComponent '%s': error calling function %s: %s",

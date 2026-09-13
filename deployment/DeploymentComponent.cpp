@@ -81,6 +81,16 @@ namespace OCL
 
     static int got_signal = -1;
 
+    static bool validConnectionPolicy(const ConnPolicy& policy, bool allowOutputStream)
+    {
+        if (policy.type == ConnPolicy::DATA ||
+            (allowOutputStream && policy.type == ConnPolicy::UNBUFFERED)) return true;
+        Logger::log().logf(Logger::Error, "DeploymentComponent",
+                           "Unsupported data port connection policy type %d. Use DATA (0); FIFO and circular-buffer modes were removed.",
+                           policy.type);
+        return false;
+    }
+
     // Signal code only on Posix:
 #if defined(USE_SIGNALS)
     // catch ctrl+c signal
@@ -159,20 +169,22 @@ namespace OCL
         this->addOperation("waitForSignal", &DeploymentComponent::waitForSignal, this, ClientThread).doc("This operation waits for the signal of the argument and then returns. This allows you to wait in a script for any signal except SIGKILL and SIGSTOP.").arg("signal number","The signal number to wait for.");
 
 
+        this->addOperation("connectPort", &DeploymentComponent::connectPort, this, ClientThread)
+            .doc("Declare an exactly typed whole-port cyclic connection.")
+            .arg("Source", "Service-qualified output port.").arg("Destination", "Service-qualified input port.");
+        this->addOperation("connectMember", &DeploymentComponent::connectMember, this, ClientThread)
+            .doc("Declare a typed cyclic member mapping. Empty member paths select whole values.")
+            .arg("Source", "Service-qualified output port.").arg("SourceMember", "Member or fixed-array path.")
+            .arg("Destination", "Service-qualified input port.").arg("DestinationMember", "Member or fixed-array path.");
+        this->addOperation("finalizeConnections", &DeploymentComponent::finalizeConnections, this, ClientThread)
+            .doc("Validate and prepare cyclic connections of all peers before activation.");
+
         // Work around compiler ambiguity:
         typedef bool(DeploymentComponent::*DCFun)(const std::string&, const std::string&);
         DCFun cp = &DeploymentComponent::connectPeers;
         this->addOperation("connectPeers", cp, this, ClientThread).doc("Connect two Components known to this Component.").arg("One", "The first component.").arg("Two", "The second component.");
         cp = &DeploymentComponent::connectPorts;
         this->addOperation("connectPorts", cp, this, ClientThread).doc("DEPRECATED. Connect the Data Ports of two Components known to this Component.").arg("One", "The first component.").arg("Two", "The second component.");
-        typedef bool(DeploymentComponent::*DC4Fun)(const std::string&, const std::string&,
-                                                   const std::string&, const std::string&);
-        DC4Fun cp4 = &DeploymentComponent::connectPorts;
-        this->addOperation("connectTwoPorts", cp4, this, ClientThread).doc("DEPRECATED. Connect two ports of Components known to this Component.")
-                .arg("One", "The first component.")
-                .arg("PortOne", "The port name of the first component.")
-                .arg("Two", "The second component.")
-                .arg("PortTwo", "The port name of the second component.");
         this->addOperation("createStream", &DeploymentComponent::createStream, this, ClientThread).doc("DEPRECATED. Creates a stream to or from a port.")
                 .arg("component", "The component which owns 'port'.")
                 .arg("port", "The port to create a stream from or to.")
@@ -592,7 +604,7 @@ namespace OCL
     	boost::split(strs, names, boost::is_any_of("."));
 
       // strs could be empty because of a bug in Boost 1.44 (see https://svn.boost.org/trac/boost/ticket/4751)
-      if (strs.empty()) return 0;
+      if (strs.size() < 2 || std::find(strs.begin(), strs.end(), std::string()) != strs.end()) return 0;
 
     	string component = strs.front();
         RTT::TaskContext *tc = (((component == this->getName()) || (component == "this")) ? this : getPeer(component));
@@ -631,6 +643,37 @@ namespace OCL
     	return ret;
     }
 
+    bool DeploymentComponent::connectPort(const std::string& source, const std::string& destination)
+    {
+        return connectMember(source, "", destination, "");
+    }
+
+    bool DeploymentComponent::connectMember(const std::string& source, const std::string& sourceMember,
+                                             const std::string& destination, const std::string& destinationMember)
+    {
+        base::OutputPortInterface* output = dynamic_cast<base::OutputPortInterface*>(stringToPort(source));
+        base::InputPortInterface* input = dynamic_cast<base::InputPortInterface*>(stringToPort(destination));
+        if (!output || !input) {
+            Logger::log().logf(Logger::Error, "DeploymentComponent::connectMember",
+                              "Expected output '%s' and input '%s'", source.c_str(), destination.c_str());
+            return false;
+        }
+        return RTT::connectMembers(*output, sourceMember, *input, destinationMember);
+    }
+
+    bool DeploymentComponent::finalizeConnections()
+    {
+        const PeerList peers = getPeerList();
+        // Check all states first, so an active peer cannot cause partial preparation.
+        if (isRunning()) return false;
+        for (PeerList::const_iterator it = peers.begin(); it != peers.end(); ++it)
+            if (getPeer(*it)->isRunning()) return false;
+        bool result = TaskContext::finalizeConnections();
+        for (PeerList::const_iterator it = peers.begin(); it != peers.end(); ++it)
+            result = getPeer(*it)->finalizeConnections() && result;
+        return result;
+    }
+
     bool DeploymentComponent::connectPorts(const std::string& one, const std::string& other)
     {
         RTT::TaskContext* a, *b;
@@ -650,53 +693,9 @@ namespace OCL
         return a->connectPorts(b);
     }
 
-    bool DeploymentComponent::connectPorts(const std::string& one, const std::string& one_port,
-                                           const std::string& other, const std::string& other_port)
-    {
-		Service::shared_ptr a,b;
-		a = stringToService(one);
-		b = stringToService(other);
-		if (!a || !b)
-			return false;
-        base::PortInterface* ap, *bp;
-        ap = a->getPort(one_port);
-        bp = b->getPort(other_port);
-        if ( !ap ) {
-            Logger::log().logf(Logger::Error, "DeploymentComponent::connectPorts",
-                               "%s does not have a port %s", one.c_str(), one_port.c_str());
-            return false;
-        }
-        if ( !bp ) {
-            Logger::log().logf(Logger::Error, "DeploymentComponent::connectPorts",
-                               "%s does not have a port %s", other.c_str(), other_port.c_str());
-            return false;
-        }
-
-        // Warn about already connected ports.
-        if ( ap->connected() && bp->connected() ) {
-            Logger::log().logf(Logger::Debug, "DeploymentComponent::connectPorts",
-                               "Port '%s' of Component '%s' and port '%s' of Component '%s' are already connected but (probably) not to each other. Connecting them anyway.",
-                               ap->getName().c_str(), a->getName().c_str(),
-                               bp->getName().c_str(), b->getName().c_str());
-        }
-
-        // use the base::PortInterface implementation
-        if ( ap->connectTo( bp ) ) {
-            // all went fine.
-            Logger::log().logf(Logger::Info, "DeploymentComponent::connectPorts",
-                               "Connected Port %s.%s to  %s.%s.",
-                               one.c_str(), one_port.c_str(), other.c_str(), other_port.c_str());
-            return true;
-        } else {
-            Logger::log().logf(Logger::Error, "DeploymentComponent::connectPorts",
-                               "Failed to connect Port %s.%s to  %s.%s.",
-                               one.c_str(), one_port.c_str(), other.c_str(), other_port.c_str());
-            return true;
-        }
-    }
-
     bool DeploymentComponent::createStream(const std::string& comp, const std::string& port, ConnPolicy policy)
     {
+        if (!validConnectionPolicy(policy, true)) return false;
         Service::shared_ptr serv = stringToService(comp);
         if ( !serv )
             return false;
@@ -713,6 +712,7 @@ namespace OCL
     // New API:
     bool DeploymentComponent::connect(const std::string& one, const std::string& other, ConnPolicy cp)
     {
+        if (!validConnectionPolicy(cp, false)) return false;
 		base::PortInterface* ap, *bp;
 		ap = stringToPort(one);
 		bp = stringToPort(other);
@@ -742,6 +742,7 @@ namespace OCL
 
     bool DeploymentComponent::stream(const std::string& port, ConnPolicy policy)
     {
+        if (!validConnectionPolicy(policy, true)) return false;
         base::PortInterface* porti = stringToPort(port);
         if ( !porti ) {
             return false;
@@ -1166,6 +1167,10 @@ namespace OCL
                         assert( cp_prop.ready() );
                         if ( cp_prop.compose( comp ) ) {
                             //It's a connection policy.
+                            if (!validConnectionPolicy(cp_prop.get(), cp_prop.getName() != "Default")) {
+                                valid = false;
+                                continue;
+                            }
 #if defined(RTT_VERSION_GTE)
 #if RTT_VERSION_GTE(2,8,99)
                             // Set default ConnPolicy
@@ -1182,6 +1187,14 @@ namespace OCL
 #endif
                             Logger::log().logf(Logger::Debug, "DeploymentComponent::loadComponents",
                                                "Saw connection policy %s", (*it)->getName().c_str());
+                            continue;
+                        }
+
+                        if (comp.rvalue().getType() == "ConnPolicy") {
+                            Logger::log().logf(Logger::Error, "DeploymentComponent::loadComponents",
+                                               "Invalid connection policy '%s'. Data ports require DATA (0); FIFO and circular-buffer modes were removed.",
+                                               comp.getName().c_str());
+                            valid = false;
                             continue;
                         }
 

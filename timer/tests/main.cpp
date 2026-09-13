@@ -13,7 +13,7 @@ using namespace RTT;
 class TestTaskContext
     : public RTT::TaskContext
 {
-    InputPort<os::Timer::TimerId> receiver;
+    InputPort<std::uint64_t> receiver;
 public:
     TestTaskContext(std::string name)
         : RTT::TaskContext(name, PreOperational),
@@ -33,11 +33,10 @@ public:
 
     void updateHook()
     {
-        os::Timer::TimerId id;
-        if (receiver.read(id) == NewData)
+        if (receiver.status() == NewData)
             Logger::log().logf(Logger::Info, "timer tests",
-                               "%s detects timeout for timer %d",
-                               this->getName().c_str(), static_cast<int>(id));
+                               "%s observes cumulative expiration count %llu",
+                               this->getName().c_str(), static_cast<unsigned long long>(receiver.data()));
     }
 };
 
