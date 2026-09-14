@@ -9,9 +9,9 @@ observes freshness without transferring data.
 Declare deployment mappings with service-qualified port names:
 
 ```text
-connectPort("source.motion.state", "sink.state")
-connectPort("source.motion.state.axes[2].position", "sink.command.position")
-connectPort("scalar.value", "sink.command.velocity")
+connectPortData("source.motion.state", "sink.state")
+connectPortData("source.motion.state.axes[2].position", "sink.command.position")
+connectPortData("scalar.value", "sink.command.velocity")
 finalizeConnections()
 ```
 

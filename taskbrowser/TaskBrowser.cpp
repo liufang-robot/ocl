@@ -1983,7 +1983,7 @@ namespace OCL
         cout << "     Float64Array(6)" <<nl;
         cout << "   = {0, 0, 0, 0, 0, 0}" <<nl;
 
-        cout << "  Port values are read-only observations; use the same paths in connectPort:" << nl;
+        cout << "  Port values are read-only observations; use the same paths in connectPortData:" << nl;
         cout << "     source.output, source.output.y, source.io.output.axes[2].position" << nl;
         cout << "  Inputs show the last acquired image; outputs show the last committed value." << nl;
         cout << "  Use ls for port types, direction and source connections." << nl;

@@ -153,7 +153,7 @@ function test_ports()
 
    depl = TC:getPeer("Deployer")
    print("connecting ports: ",
-	 depl:getOperation("connectPort")(
+	 depl:getOperation("connectPortData")(
 		   var.new("String", "lua.outport1"),
 		   var.new("String", "lua.inport1")))
 

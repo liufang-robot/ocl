@@ -337,7 +337,7 @@ namespace OCL
          * Endpoints use component.service.port.member[index].nested, just like value
          * expressions. Omit members to select the whole value. Both owners must be stopped.
          */
-        bool connectPort(const std::string& source, const std::string& destination);
+        bool connectPortData(const std::string& source, const std::string& destination);
         /** Report any whole/member connection of a whole port. Rejects member paths. */
         bool isPortConnected(const std::string& path);
         /** Disconnect all writers/readers of a whole port while stopped. Rejects member paths. */
@@ -351,7 +351,7 @@ namespace OCL
          * of the connection is determined by the read/write port types.
          *
          * @note Using this function is not advised, since it relies on equal
-         * port names on both components. Use connectPort() with the
+         * port names on both components. Use connectPortData() with the
          * service-qualified output and input port names instead.
          *
          * @deprecated by connect()

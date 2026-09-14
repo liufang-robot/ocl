@@ -170,7 +170,7 @@ namespace OCL
         this->addOperation("waitForSignal", &DeploymentComponent::waitForSignal, this, ClientThread).doc("This operation waits for the signal of the argument and then returns. This allows you to wait in a script for any signal except SIGKILL and SIGSTOP.").arg("signal number","The signal number to wait for.");
 
 
-        this->addOperation("connectPort", &DeploymentComponent::connectPort, this, ClientThread)
+        this->addOperation("connectPortData", &DeploymentComponent::connectPortData, this, ClientThread)
             .doc("Declare an exactly typed cyclic connection between whole values or selected members.")
             .arg("Source", "Output value endpoint: component.service.port.member[index].nested.")
             .arg("Destination", "Input value endpoint: component.service.port.member[index].nested.");
@@ -667,7 +667,7 @@ namespace OCL
         }
     }
 
-    bool DeploymentComponent::connectPort(const std::string& source, const std::string& destination)
+    bool DeploymentComponent::connectPortData(const std::string& source, const std::string& destination)
     {
         auto deployment = lockDeployment();
         PortEndpoint from, to;
@@ -676,7 +676,7 @@ namespace OCL
         auto* output = dynamic_cast<base::OutputPortInterface*>(from.port);
         auto* input = dynamic_cast<base::InputPortInterface*>(to.port);
         if (!output || !input) {
-            Logger::log().logf(Logger::Error, "DeploymentComponent::connectPort",
+            Logger::log().logf(Logger::Error, "DeploymentComponent::connectPortData",
                               "Expected output '%s' and input '%s'", source.c_str(), destination.c_str());
             return false;
         }

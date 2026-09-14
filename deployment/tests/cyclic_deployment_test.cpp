@@ -161,43 +161,44 @@ int ORO_main(int, char**) {
         RTT::OutputPort<double> self_output("self_output");
         RTT::InputPort<double> self_input("self_input");
         deployer.addPort(self_output); deployer.addPort(self_input);
-        require(deployer.connectPort("this.self_output", "cyclic_deployer.self_input"),
+        require(deployer.connectPortData("this.self_output", "cyclic_deployer.self_input"),
                 "retain the this alias for deployer-owned ports");
         require(deployer.isPortConnected("this.self_input"), "inspect the deployer-owned input");
         require(deployer.disconnectPort("this.self_input"), "disconnect the deployer-owned input");
-        for (const auto* operation : {"connect", "connectPorts", "connectPort", "finalizeConnections", "isPortConnected", "disconnectPort"})
+        for (const auto* operation : {"connect", "connectPorts", "connectPortData", "finalizeConnections", "isPortConnected", "disconnectPort"})
             require(deployer.provides()->hasOperation(operation), "missing cyclic deployment operation");
         require(!deployer.provides()->hasOperation("connectTwoPorts"), "removed connectTwoPorts operation remains available");
         require(!deployer.provides()->hasOperation("connectMember"), "removed connectMember operation remains available");
+        require(!deployer.provides()->hasOperation("connectPort"), "renamed connectPort operation remains available");
         for (const char* source : {"", "::sample", "Source.nested::sample", "Source.nested::sample::y",
                                    "Source.nested.:sample", "Source..nested", "Source.nested.", "Source"}) {
-            require(!deployer.connectPort(source, "Sink.invalid"), "reject malformed source endpoint");
+            require(!deployer.connectPortData(source, "Sink.invalid"), "reject malformed source endpoint");
             require(!consumer.invalid.connected(), "malformed source must not create a connection");
         }
         for (const char* destination : {"", "::sample", "Sink.invalid::sample", "Sink.invalid::sample::y",
                                         "Sink.invalid.:sample", "Sink..invalid", "Sink.invalid.", "Sink"}) {
-            require(!deployer.connectPort("Source.nested", destination), "reject malformed destination endpoint");
+            require(!deployer.connectPortData("Source.nested", destination), "reject malformed destination endpoint");
             require(!consumer.invalid.connected(), "malformed destination must not create a connection");
         }
         for (const char* source : {"Source.nested.missing", "Source.nested.axes[-1].y", "Source.nested.axes[3].y",
                                    "Source.nested.axes[1x].y", "Source.nested.axes[1].", "Source.nested.sample..y"}) {
-            require(!deployer.connectPort(source, "Sink.unmapped"), "reject invalid member or fixed-array selector");
+            require(!deployer.connectPortData(source, "Sink.unmapped"), "reject invalid member or fixed-array selector");
             require(!consumer.unmapped.connected(), "invalid member must not create a connection");
         }
-        require(!deployer.connectPort("Source.motion.io.sample::y", "Sink.unmapped"), "reject otherwise valid legacy source selector");
-        require(!deployer.connectPort("Scalar.value", "Sink.invalid::sample.y"), "reject otherwise valid legacy destination selector");
+        require(!deployer.connectPortData("Source.motion.io.sample::y", "Sink.unmapped"), "reject otherwise valid legacy source selector");
+        require(!deployer.connectPortData("Scalar.value", "Sink.invalid::sample.y"), "reject otherwise valid legacy destination selector");
         require(!consumer.unmapped.connected() && !consumer.invalid.connected(), "legacy syntax creates no writers");
-        require(!deployer.connectPort("Source.nested.mode", "Sink.unmapped"), "reject different selected types");
-        require(!deployer.connectPort("Source.short_array.values", "Sink.invalid.values"), "reject different fixed-array shapes");
+        require(!deployer.connectPortData("Source.nested.mode", "Sink.unmapped"), "reject different selected types");
+        require(!deployer.connectPortData("Source.short_array.values", "Sink.invalid.values"), "reject different fixed-array shapes");
         require(deployer.runScript(OCL_CYCLIC_CONNECTION_SCRIPT), "real deployment script");
-        require(!deployer.connectPort("Source.motion.io.sample.y", "Sink.fused.x"), "reject duplicate writer");
-        require(!deployer.connectPort("Source.nested", "Sink.nested"), "reject whole writer overlapping members");
-        require(!deployer.connectPort("Scalar.value", "Sink.copy.y"), "reject member writer overlapping whole value");
-        require(!deployer.connectPort("Scalar.value", "Sink.nested.axes[0].y"), "reject writer overlapping selected struct");
-        require(!deployer.connectPort("Source", "Sink.copy"), "reject incomplete qualified port path");
-        require(!deployer.connectPort("Source.motion.io.sample", "Sink.fused"), "reject different parent types");
-        require(!deployer.connectPort("Source.motion.missing.sample", "Sink.copy"), "reject unknown service");
-        require(!deployer.connectPort("Sink.copy", "Source.motion.io.sample"), "reject reversed direction");
+        require(!deployer.connectPortData("Source.motion.io.sample.y", "Sink.fused.x"), "reject duplicate writer");
+        require(!deployer.connectPortData("Source.nested", "Sink.nested"), "reject whole writer overlapping members");
+        require(!deployer.connectPortData("Scalar.value", "Sink.copy.y"), "reject member writer overlapping whole value");
+        require(!deployer.connectPortData("Scalar.value", "Sink.nested.axes[0].y"), "reject writer overlapping selected struct");
+        require(!deployer.connectPortData("Source", "Sink.copy"), "reject incomplete qualified port path");
+        require(!deployer.connectPortData("Source.motion.io.sample", "Sink.fused"), "reject different parent types");
+        require(!deployer.connectPortData("Source.motion.missing.sample", "Sink.copy"), "reject unknown service");
+        require(!deployer.connectPortData("Sink.copy", "Source.motion.io.sample"), "reject reversed direction");
         RTT::OperationCaller<bool(const std::string&)> connected = deployer.getOperation("isPortConnected");
         RTT::OperationCaller<bool(const std::string&)> disconnect = deployer.getOperation("disconnectPort");
         require(connected.ready() && disconnect.ready(), "explicit port management operations");
@@ -209,7 +210,7 @@ int ORO_main(int, char**) {
         require(deployer.finalizeConnections(), "finalization survives rejected declarations");
         require(producer.start() && scalar.start() && consumer.start(), "start all components");
         require(!deployer.finalizeConnections(), "reject active finalization");
-        require(!deployer.connectPort("Source.motion.io.sample", "Sink.copy"), "reject active topology mutation");
+        require(!deployer.connectPortData("Source.motion.io.sample", "Sink.copy"), "reject active topology mutation");
         require(!disconnect("Sink.copy"), "active disconnect is rejected");
         cycle(producer); cycle(scalar); cycle(consumer);
         require(consumer.cycles == 1, "consumer hook completed");
