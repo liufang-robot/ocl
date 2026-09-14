@@ -340,6 +340,18 @@ namespace OCL
         bool connectPortData(const std::string& source, const std::string& destination);
         /** Report any whole/member connection of a whole port. Rejects member paths. */
         bool isPortConnected(const std::string& path);
+        /** Return a whole port's documentation. Empty for undocumented ports or invalid paths.
+         * Invalid paths are logged. Member selectors are rejected.
+         */
+        std::string getPortDescription(const std::string& path);
+        /** Return a whole port's direction: 0 = input, 1 = output, -1 = invalid path.
+         * Invalid paths are logged. Member selectors are rejected.
+         */
+        int getPortDirection(const std::string& path);
+        /** Return a whole port's canonical RTT type name, or empty for an invalid path.
+         * Invalid paths are logged. Member selectors are rejected.
+         */
+        std::string getPortType(const std::string& path);
         /** Disconnect all writers/readers of a whole port while stopped. Rejects member paths. */
         bool disconnectPort(const std::string& path);
         /** Prepare every peer's cyclic connections while stopped. */

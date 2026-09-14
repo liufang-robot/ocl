@@ -30,5 +30,11 @@ int main()
         &OCL::DeploymentComponent::isPortConnected;
     bool (OCL::DeploymentComponent::*disconnect)(const std::string&) =
         &OCL::DeploymentComponent::disconnectPort;
-    return method && connectPortData && connected && disconnect ? 0 : 1;
+    std::string (OCL::DeploymentComponent::*description)(const std::string&) =
+        &OCL::DeploymentComponent::getPortDescription;
+    std::string (OCL::DeploymentComponent::*type)(const std::string&) =
+        &OCL::DeploymentComponent::getPortType;
+    int (OCL::DeploymentComponent::*direction)(const std::string&) =
+        &OCL::DeploymentComponent::getPortDirection;
+    return method && connectPortData && connected && disconnect && description && type && direction ? 0 : 1;
 }

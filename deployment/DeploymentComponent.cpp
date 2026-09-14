@@ -177,6 +177,15 @@ namespace OCL
         this->addOperation("isPortConnected", &DeploymentComponent::isPortConnected, this, ClientThread)
             .doc("Reports whether a whole port has any source or destination connections.")
             .arg("Port", "Whole port path: component.service.port; member selectors are rejected.");
+        this->addOperation("getPortDescription", &DeploymentComponent::getPortDescription, this, ClientThread)
+            .doc("Returns a port's documentation; empty for an undocumented port or invalid path. Invalid paths are logged.")
+            .arg("Port", "Whole port path: component.service.port; member selectors are rejected.");
+        this->addOperation("getPortDirection", &DeploymentComponent::getPortDirection, this, ClientThread)
+            .doc("Returns a port's direction: 0 = input, 1 = output, -1 = invalid path. Invalid paths are logged.")
+            .arg("Port", "Whole port path: component.service.port; member selectors are rejected.");
+        this->addOperation("getPortType", &DeploymentComponent::getPortType, this, ClientThread)
+            .doc("Returns a port's canonical RTT type name; empty for an invalid path. Invalid paths are logged.")
+            .arg("Port", "Whole port path: component.service.port; member selectors are rejected.");
         this->addOperation("disconnectPort", &DeploymentComponent::disconnectPort, this, ClientThread)
             .doc("Removes all whole and member connections of one port while its graph is stopped.")
             .arg("Port", "Whole port path: component.service.port; member selectors are rejected.");
@@ -665,6 +674,19 @@ namespace OCL
                               component ? error.c_str() : "unknown component");
             return false;
         }
+
+        base::PortInterface* resolveDeploymentPort(TaskContext& deployer, const std::string& path)
+        {
+            PortEndpoint endpoint;
+            if (resolveDeploymentEndpoint(deployer, path, endpoint) && endpoint.member.empty())
+                return endpoint.port;
+            Logger::log().logf(Logger::Error, "DeploymentComponent",
+                              "Expected a whole port path: '%s'", path.c_str());
+            return nullptr;
+        }
+
+        // Integer codes match the port direction metadata exposed by OPC UA.
+        enum class DeploymentPortDirection { invalid = -1, input = 0, output = 1 };
     }
 
     bool DeploymentComponent::connectPortData(const std::string& source, const std::string& destination)
@@ -689,6 +711,30 @@ namespace OCL
         PortEndpoint endpoint;
         return resolveDeploymentEndpoint(*this, path, endpoint)
             && endpoint.member.empty() && endpoint.port->connected();
+    }
+
+    std::string DeploymentComponent::getPortDescription(const std::string& path)
+    {
+        auto deployment = lockDeployment();
+        auto* port = resolveDeploymentPort(*this, path);
+        return port ? port->getDescription() : std::string();
+    }
+
+    int DeploymentComponent::getPortDirection(const std::string& path)
+    {
+        auto deployment = lockDeployment();
+        auto* port = resolveDeploymentPort(*this, path);
+        auto direction = DeploymentPortDirection::invalid;
+        if (dynamic_cast<base::InputPortInterface*>(port)) direction = DeploymentPortDirection::input;
+        else if (dynamic_cast<base::OutputPortInterface*>(port)) direction = DeploymentPortDirection::output;
+        return static_cast<int>(direction);
+    }
+
+    std::string DeploymentComponent::getPortType(const std::string& path)
+    {
+        auto deployment = lockDeployment();
+        auto* port = resolveDeploymentPort(*this, path);
+        return port ? port->getTypeInfo()->getTypeName() : std::string();
     }
 
     bool DeploymentComponent::disconnectPort(const std::string& path)

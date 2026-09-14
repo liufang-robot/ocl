@@ -51,11 +51,15 @@ public:
     RTT::OutputPort<YZ> sample{"sample"};
     RTT::OutputPort<Nested> nested{"nested"};
     RTT::OutputPort<ShortArray> shortArray{"short_array"};
+    double gain = 1;
+    int count = 0;
     Producer() : TaskContext("Source") {
         auto motion = RTT::Service::Create("motion");
         auto io = RTT::Service::Create("io");
         provides()->addService(motion); motion->addService(io);
-        io->addPort(sample); addPort(nested); addPort(shortArray);
+        io->addPort(sample).doc("Measured y and z");
+        io->addProperty("Gain", gain); io->addAttribute("Count", count);
+        addPort(nested); addPort(shortArray);
         setActivity(new RTT::extras::SlaveActivity(0.01));
     }
     void updateHook() override {
@@ -82,7 +86,7 @@ public:
     RTT::InputPort<double> scalar{"scalar"}, unmapped{"unmapped"};
     unsigned cycles = 0;
     Consumer() : TaskContext("Sink") {
-        addPort(fused); addPort(copy); addPort(nested); addPort(selected);
+        addPort(fused); addPort(copy).doc("Copied y and z"); addPort(nested); addPort(selected);
         addPort(invalid); addPort(scalar); addPort(unmapped);
         setActivity(new RTT::extras::SlaveActivity(0.01));
     }
@@ -160,7 +164,34 @@ int ORO_main(int, char**) {
         deployer.addPeer(&producer); deployer.addPeer(&scalar); deployer.addPeer(&consumer);
         RTT::OutputPort<double> self_output("self_output");
         RTT::InputPort<double> self_input("self_input");
-        deployer.addPort(self_output); deployer.addPort(self_input);
+        deployer.addPort(self_output).doc("Deployer output"); deployer.addPort(self_input);
+        RTT::OperationCaller<std::string(const std::string&)> description = deployer.getOperation("getPortDescription");
+        RTT::OperationCaller<std::string(const std::string&)> type = deployer.getOperation("getPortType");
+        RTT::OperationCaller<int(const std::string&)> direction = deployer.getOperation("getPortDirection");
+        require(description.ready() && type.ready() && direction.ready(), "port metadata operations are callable");
+        require(description("Source.motion.io.sample") == "Measured y and z"
+                && type("Source.motion.io.sample") == "ocl_cyclic_yz"
+                && direction("Source.motion.io.sample") == 1, "nested output metadata before connection");
+        require(description("Sink.copy") == "Copied y and z" && type("Sink.copy") == "ocl_cyclic_yz"
+                && direction("Sink.copy") == 0, "input metadata before connection");
+        require(description("Sink.unmapped").empty() && type("Sink.unmapped") == "Float64"
+                && direction("Sink.unmapped") == 0, "undocumented unconnected port is valid");
+        require(description("this.self_output") == "Deployer output"
+                && type("cyclic_deployer.self_output") == "Float64"
+                && direction("cyclic_deployer.self_output") == 1
+                && direction("this.self_input") == 0, "metadata accepts both deployer aliases");
+        for (const char* path : {"", "Source", "Missing.sample", "Source.motion.missing.sample",
+                                 "Source.motion.io", "Source.motion.io.Gain", "Source.motion.io.Count",
+                                 "Source.motion.io.sample.y", "Source.nested.axes[0]", "Sink.copy[0]",
+                                 "Source..nested", "Source.nested.", "Source.nested::sample"}) {
+            require(description(path).empty() && type(path).empty() && direction(path) == -1,
+                    "metadata rejects anything except a whole port path");
+        }
+        std::string scriptDescription, scriptType;
+        int scriptDirection = -1;
+        deployer.addAttribute("ScriptPortDescription", scriptDescription);
+        deployer.addAttribute("ScriptPortType", scriptType);
+        deployer.addAttribute("ScriptPortDirection", scriptDirection);
         require(deployer.connectPortData("this.self_output", "cyclic_deployer.self_input"),
                 "retain the this alias for deployer-owned ports");
         require(deployer.isPortConnected("this.self_input"), "inspect the deployer-owned input");
@@ -191,6 +222,8 @@ int ORO_main(int, char**) {
         require(!deployer.connectPortData("Source.nested.mode", "Sink.unmapped"), "reject different selected types");
         require(!deployer.connectPortData("Source.short_array.values", "Sink.invalid.values"), "reject different fixed-array shapes");
         require(deployer.runScript(OCL_CYCLIC_CONNECTION_SCRIPT), "real deployment script");
+        require(scriptDescription == "Measured y and z" && scriptType == "ocl_cyclic_yz" && scriptDirection == 0,
+                "real deployment script reads metadata from connected ports");
         require(!deployer.connectPortData("Source.motion.io.sample.y", "Sink.fused.x"), "reject duplicate writer");
         require(!deployer.connectPortData("Source.nested", "Sink.nested"), "reject whole writer overlapping members");
         require(!deployer.connectPortData("Scalar.value", "Sink.copy.y"), "reject member writer overlapping whole value");
@@ -214,6 +247,12 @@ int ORO_main(int, char**) {
         require(!disconnect("Sink.copy"), "active disconnect is rejected");
         cycle(producer); cycle(scalar); cycle(consumer);
         require(consumer.cycles == 1, "consumer hook completed");
+        require(description("Source.motion.io.sample") == "Measured y and z"
+                && type("Sink.copy") == "ocl_cyclic_yz" && direction("Sink.copy") == 0,
+                "metadata remains available while connected components run");
+        require(consumer.copy.data().y == 7 && producer.sample.data().y == 7
+                && connected("Sink.copy") && !connected("Sink.unmapped"),
+                "metadata inspection preserves port data and connections");
         cycle(consumer);
         require(consumer.cycles == 2, "retained input values without new source cycles");
         consumer.stop(); scalar.stop(); producer.stop();
