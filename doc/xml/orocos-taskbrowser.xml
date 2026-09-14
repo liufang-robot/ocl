@@ -115,9 +115,10 @@
 	  </row>
 	  <row>
 	    <entry>ls</entry>
-	    <entry>[peer]</entry>
-	    <entry>Lists the interface and status of a Component. Without peer, 
-	    the current visited component is shown.</entry>
+	    <entry>[peer or service]</entry>
+	    <entry>Lists the interface and status of a component or service. Without
+            an argument, the current visited component is shown. Connected input
+            ports also list their output sources and selected members.</entry>
 	  </row>
 	  <row>
 	    <entry>cd</entry>
@@ -243,5 +244,47 @@
       </tgroup>
     </table>
     
+    <section>
+      <title>Inspecting input connections</title>
+      <para>
+        Read whole port values directly, for example <literal>source.output</literal>,
+        or select typed data with <literal>source.output.y</literal> and
+        <literal>source.output.axes[2].position</literal>. Inputs show their last
+        acquired image and outputs their last committed value. These expressions
+        are read-only and do not consume samples or schedule component cycles.
+        Inputs initially show their default image. Outputs show
+        <literal>(unavailable)</literal> until the first commit; unavailable values
+        cannot supply operation arguments.
+        Ports do not generate services or methods. Manage whole ports with
+        <literal>isPortConnected("source.output")</literal> and
+        <literal>disconnectPort("source.output")</literal>; member selectors are
+        rejected by these management operations, and disconnection requires the
+        affected graph to be stopped.
+      </para>
+      <para>
+        Use <literal>ls sink.io</literal> to inspect a peer's service ports, or
+        <literal>ls io</literal> when visiting the sink. Each connected input
+        lists the output endpoint that supplies it. Member mappings appear
+        below the port's type, value, and connection status:
+      </para>
+      <programlisting>input.x &lt;- scalar_source.output
+input.y &lt;- pair_source.output.y
+whole &lt;- pair_source.output
+selected &lt;- pair_source.output.z</programlisting>
+      <para>
+        The left side is relative to the displayed service. The right side
+        includes the source component and any nested services. A whole-port
+        connection has no member suffix. Fixed-array selections retain their
+        indices, for example <literal>input.values[2]</literal>. Listings show
+        the current graph, including disconnects and reconnects; they do not
+        consume input samples. <literal>help io</literal> displays the same
+        source information with the service's detailed interface.
+      </para>
+      <para>
+        A connection whose output identity is unavailable, such as an external
+        transport stream, displays <literal>&lt;source unavailable&gt;</literal>.
+        Unconnected inputs have no source lines.
+      </para>
+    </section>
   </section>
 </article>

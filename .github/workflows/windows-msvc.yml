@@ -11,7 +11,7 @@ on:
       rtt_ref:
         description: RTT branch, tag, or SHA to build against
         required: false
-        default: dev
+        default: feat/automatic-cyclic-io
 
 jobs:
   build:
@@ -24,7 +24,7 @@ jobs:
       INSTALL_PREFIX: ${{ github.workspace }}\install-msvc
       RTT_BUILD_DIR: ${{ github.workspace }}\build-rtt-msvc
       OCL_BUILD_DIR: ${{ github.workspace }}\build-ocl-msvc
-      RTT_REF: ${{ github.event.inputs.rtt_ref || 'dev' }}
+      RTT_REF: ${{ github.event.inputs.rtt_ref || 'feat/automatic-cyclic-io' }}
 
     steps:
       - name: Check out OCL

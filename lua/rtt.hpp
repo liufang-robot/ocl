@@ -55,11 +55,10 @@ extern "C" {
 int luaopen_rtt(lua_State *L);
 int set_context_tc(RTT::TaskContext*, lua_State*);
 
-/* call a function/0 named by string, the last two boolean arguments
- * are wether to fail if no such function exists and wether to fail if
- * no boolean result is returned.
+/* Call a zero-argument function. The integer flags require the function and a
+ * boolean result respectively. owner_hook grants the native lifecycle owner
+ * access to its own images for the duration of this call.
  */
-bool call_func(lua_State*, const char*, RTT::TaskContext*, int, int);
+bool call_func(lua_State*, const char*, RTT::TaskContext*, int, int, bool owner_hook = false);
 }
-
 

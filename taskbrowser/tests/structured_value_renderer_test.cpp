@@ -4,33 +4,52 @@
 #include "taskbrowser/internal/StructuredValueRenderer.hpp"
 
 #include <boost/intrusive_ptr.hpp>
+#include <boost/algorithm/string/join.hpp>
 #include <boost/serialization/nvp.hpp>
 #include <rtt/internal/DataSources.hpp>
+#include <rtt/internal/PortDataAccess.hpp>
+#include <rtt/InputPort.hpp>
+#include <rtt/OutputPort.hpp>
 #include <rtt/Property.hpp>
 #include <rtt/PropertyBag.hpp>
 #include <rtt/TaskContext.hpp>
+#include <rtt/extras/SlaveActivity.hpp>
 #include <rtt/typekit/RealTimeTypekit.hpp>
 #include <rtt/types/SequenceTypeInfo.hpp>
+#include <rtt/types/CArrayTypeInfo.hpp>
 #include <rtt/types/StructTypeInfo.hpp>
 #include <rtt/types/TemplateTypeInfo.hpp>
 #include <rtt/types/Types.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <istream>
 #include <map>
 #include <ostream>
 #include <regex>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "taskbrowser/TaskBrowser.hpp"
 
+#if defined(HAS_EDITLINE)
+#include <editline/readline.h>
+#elif defined(HAS_READLINE) && !defined(NO_GPL)
+#include <readline/readline.h>
+#endif
+
 namespace renderer_test {
 
 struct Point { double x{0.0}; double y{0.0}; };
 struct Envelope { Point point; std::int32_t quality{0}; };
+struct Axis { double position{0.0}; };
+struct PortState {
+  Axis axes[3];
+  double connected{73.0}, name{79.0}, status{83.0}, snapshot{71.0}, data{89.0};
+};
 struct Opaque { std::int32_t value{0}; };
 struct Empty {};
 struct TextValue { std::string text; };
@@ -83,6 +102,19 @@ template <class Archive>
 void serialize(Archive &archive, renderer_test::Envelope &value, const unsigned int) {
   archive & make_nvp("point", value.point);
   archive & make_nvp("quality", value.quality);
+}
+template <class Archive>
+void serialize(Archive &archive, renderer_test::Axis &value, const unsigned int) {
+  archive & make_nvp("position", value.position);
+}
+template <class Archive>
+void serialize(Archive &archive, renderer_test::PortState &value, const unsigned int) {
+  archive & make_nvp("axes", make_array(value.axes, 3));
+  archive & make_nvp("connected", value.connected);
+  archive & make_nvp("name", value.name);
+  archive & make_nvp("status", value.status);
+  archive & make_nvp("snapshot", value.snapshot);
+  archive & make_nvp("data", value.data);
 }
 template <class Archive>
 void serialize(Archive &, renderer_test::Empty &, const unsigned int) {}
@@ -145,12 +177,17 @@ void loadRendererTypes() {
   auto types = RTT::types::Types();
   if (types->type("Float64") == nullptr) {
     RTT::types::RealTimeTypekitPlugin().loadTypes();
+    RTT::types::RealTimeTypekitPlugin().loadConstructors();
+    RTT::types::RealTimeTypekitPlugin().loadOperators();
   }
   if (types->type("/test/taskbrowser/Point") == nullptr) {
     BOOST_REQUIRE(types->addType(new RTT::types::StructTypeInfo<renderer_test::Point, true>("/test/taskbrowser/Point")));
     BOOST_REQUIRE(types->addType(new RTT::types::SequenceTypeInfo<std::vector<renderer_test::Point>>("/test/taskbrowser/PointArray")));
     BOOST_REQUIRE(types->addType(new RTT::types::SequenceTypeInfo<std::vector<std::vector<std::int32_t>>>("/test/taskbrowser/Int32Matrix")));
     BOOST_REQUIRE(types->addType(new RTT::types::StructTypeInfo<renderer_test::Envelope, true>("/test/taskbrowser/Envelope")));
+    BOOST_REQUIRE(types->addType(new RTT::types::StructTypeInfo<renderer_test::Axis, false>("/test/taskbrowser/Axis")));
+    BOOST_REQUIRE(types->addType(new RTT::types::CArrayTypeInfo<RTT::types::carray<renderer_test::Axis>>("/test/taskbrowser/Axes")));
+    BOOST_REQUIRE(types->addType(new RTT::types::StructTypeInfo<renderer_test::PortState, false>("/test/taskbrowser/PortState")));
     BOOST_REQUIRE(types->addType(new RTT::types::TemplateTypeInfo<renderer_test::Opaque, true>("/test/taskbrowser/Opaque")));
     BOOST_REQUIRE(types->addType(new RTT::types::StructTypeInfo<renderer_test::Empty, false>("/test/taskbrowser/Empty")));
     BOOST_REQUIRE(types->addType(new RTT::types::SequenceTypeInfo<std::vector<renderer_test::Empty>>("/test/taskbrowser/EmptyArray")));
@@ -240,6 +277,54 @@ public:
     printResult(source.get(), recurse);
     return sresult.str();
   }
+
+  std::string listing(const std::string &path = "", bool serviceHelp = false) {
+    std::ostringstream output;
+    struct RestoreOutput {
+      std::streambuf *previous;
+      ~RestoreOutput() { std::cout.rdbuf(previous); }
+    } restore{std::cout.rdbuf(output.rdbuf())};
+    if (serviceHelp) printHelp(path);
+    else printInfo(path);
+    return output.str();
+  }
+
+  std::string expression(std::string command) {
+    std::ostringstream output;
+    struct RestoreOutput {
+      std::streambuf *out, *err;
+      ~RestoreOutput() { std::cout.rdbuf(out); std::cerr.rdbuf(err); }
+    } restore{std::cout.rdbuf(output.rdbuf()), std::cerr.rdbuf(output.rdbuf())};
+    evaluate(command);
+    return output.str();
+  }
+
+#if defined(HAS_EDITLINE) || (defined(HAS_READLINE) && !defined(NO_GPL))
+  std::set<std::string> complete(std::string line) {
+    // Exercise the callback installed by the real browser, without a terminal.
+    struct RestoreLine {
+      char *buffer;
+      int point;
+      ~RestoreLine() { rl_line_buffer = buffer; rl_point = point; }
+    } restore{rl_line_buffer, rl_point};
+    rl_line_buffer = line.data();
+    rl_point = static_cast<int>(line.size());
+    BOOST_REQUIRE(rl_attempted_completion_function != nullptr);
+    char **matches = rl_attempted_completion_function(line.c_str(), 0, rl_point);
+    std::set<std::string> result;
+    if (matches) {
+      // A sole match occupies element zero; otherwise it is the common prefix.
+      if (!matches[1]) result.insert(matches[0]);
+      for (std::size_t i = 1; matches[i]; ++i) {
+        result.insert(matches[i]);
+        std::free(matches[i]);
+      }
+      std::free(matches[0]);
+      std::free(matches);
+    }
+    return result;
+  }
+#endif
 };
 
 struct TaskBrowserFixture {
@@ -251,6 +336,311 @@ struct TaskBrowserFixture {
   RTT::TaskContext task;
   TaskBrowserProbe browser;
 };
+
+struct TaskBrowserConnectionsFixture {
+  TaskBrowserConnectionsFixture()
+      : source("pair_source"), scalar_source("scalar_source"), sink("sink"),
+        pair("output"), state("state"), scalar("output"), replacement("replacement"),
+        whole("whole"), input("input"), selected("selected"), unused("unused"),
+        output("result"), browser(&sink) {
+    loadRendererTypes();
+    sink.setActivity(new RTT::extras::SlaveActivity(0.01));
+    source.provides("telemetry")->provides("deep")->addPort(pair);
+    source.provides("telemetry")->provides("deep")->addPort(state);
+    sink.addPeer(&source);
+    sink.addPeer(&scalar_source);
+    source.provides("telemetry")->addOperation("scale", &TaskBrowserConnectionsFixture::scale, this, RTT::ClientThread);
+    scalar_source.addPort(scalar);
+    scalar_source.addPort(replacement);
+    sink.addPort(whole);
+    auto service = sink.provides("io")->provides("deep");
+    service->addPort(input);
+    service->addPort(selected);
+    service->addPort(unused);
+    service->addPort(output);
+    BOOST_REQUIRE(pair.connectTo(&whole));
+    // Deliberately create y before x; the listing should follow destination order.
+    BOOST_REQUIRE(RTT::connectMembers(pair, "y", input, "y"));
+    BOOST_REQUIRE(RTT::connectMembers(scalar, "", input, "x"));
+    BOOST_REQUIRE(RTT::connectMembers(pair, "x", selected, ""));
+  }
+
+  double scale(double value) { ++scale_calls; return value * 2.0; }
+  unsigned scale_calls{0};
+
+  ~TaskBrowserConnectionsFixture() {
+    if (sink.isRunning()) sink.stop();
+  }
+
+  RTT::TaskContext source, scalar_source, sink;
+  RTT::OutputPort<renderer_test::Point> pair;
+  RTT::OutputPort<renderer_test::PortState> state;
+  RTT::OutputPort<double> scalar, replacement;
+  RTT::InputPort<renderer_test::Point> whole, input;
+  RTT::InputPort<double> selected, unused;
+  RTT::OutputPort<double> output;
+  TaskBrowserProbe browser;
+};
+
+BOOST_FIXTURE_TEST_CASE(taskbrowser_evaluates_direct_port_values,
+                        TaskBrowserConnectionsFixture) {
+  pair.data() = {10.0, 20.0};
+  scalar.data() = 42.0;
+  state.data().axes[2].position = 31.0;
+  RTT::internal::PortDataAccess::commit(pair);
+  RTT::internal::PortDataAccess::commit(scalar);
+  RTT::internal::PortDataAccess::commit(state);
+
+  const auto whole_value = browser.expression("pair_source.telemetry.deep.output");
+  BOOST_TEST(whole_value.find("x: 10") != std::string::npos);
+  BOOST_TEST(whole_value.find("y: 20") != std::string::npos);
+  BOOST_TEST(whole_value.find("Operations") == std::string::npos);
+  for (const auto &[command, expected] : std::vector<std::pair<std::string, std::string>>{
+         {"scalar_source.output", " = 42"},
+         {"pair_source.telemetry.deep.output.y", " = 20"},
+         {"pair_source.telemetry.deep.state.axes[2].position", " = 31"},
+         {"pair_source.telemetry.deep.output.y + scalar_source.output", " = 62"}}) {
+    BOOST_TEST_CONTEXT(command) {
+      BOOST_TEST(browser.expression(command).find(expected) != std::string::npos);
+    }
+  }
+  BOOST_TEST(input.status() == RTT::NoData);
+  BOOST_REQUIRE(sink.start());
+  BOOST_REQUIRE(sink.getActivity()->execute());
+  sink.stop();
+  BOOST_TEST(browser.expression("io.deep.input.y").find(" = 20") != std::string::npos);
+  BOOST_TEST(browser.expression("whole").find("x: 10") != std::string::npos);
+  BOOST_TEST(input.status() == RTT::NewData);
+  pair.data().y = 29.0;
+  RTT::internal::PortDataAccess::commit(pair);
+  BOOST_TEST(browser.expression("pair_source.telemetry.deep.output.y").find(" = 29") != std::string::npos);
+}
+
+BOOST_FIXTURE_TEST_CASE(taskbrowser_port_value_wins_over_a_same_named_real_service,
+                        TaskBrowserConnectionsFixture) {
+  auto service = source.provides("telemetry")->provides("deep")->provides("output");
+  service->addOperation("scale", &TaskBrowserConnectionsFixture::scale, this, RTT::ClientThread);
+  pair.data() = {151.0, 157.0};
+  RTT::internal::PortDataAccess::commit(pair);
+  const auto value = browser.expression("pair_source.telemetry.deep.output");
+  BOOST_TEST_CONTEXT(value) {
+    BOOST_TEST(value.find("x: 151") != std::string::npos);
+    BOOST_TEST(value.find("Operations") == std::string::npos);
+  }
+  for (const bool help : {false, true}) {
+    BOOST_TEST(browser.listing("pair_source.telemetry.deep.output", help).find("scale") != std::string::npos);
+  }
+#if defined(HAS_EDITLINE) || (defined(HAS_READLINE) && !defined(NO_GPL))
+  BOOST_TEST(browser.complete("pair_source.telemetry.deep.output.x").count("pair_source.telemetry.deep.output.x") == 1U);
+#endif
+}
+
+BOOST_FIXTURE_TEST_CASE(taskbrowser_keeps_port_fields_and_management_distinct,
+                        TaskBrowserConnectionsFixture) {
+  RTT::internal::PortDataAccess::commit(state);
+  for (const auto &[field, expected] : std::vector<std::pair<std::string, std::string>>{
+         {"connected", " = 73"}, {"name", " = 79"},
+         {"status", " = 83"}, {"snapshot", " = 71"}, {"data", " = 89"}}) {
+    BOOST_TEST_CONTEXT(field) {
+      BOOST_TEST(browser.expression("pair_source.telemetry.deep.state." + field).find(expected) != std::string::npos);
+    }
+  }
+  BOOST_TEST(!source.provides("telemetry")->provides("deep")->hasService("output"));
+  BOOST_TEST(!sink.provides()->hasService("whole"));
+  BOOST_TEST(browser.expression("pair_source.telemetry.scale(21.0)").find(" = 42") != std::string::npos);
+  for (const bool help : {false, true}) {
+    const auto listing = browser.listing("pair_source.telemetry", help);
+    BOOST_TEST(listing.find("scale") != std::string::npos);
+  }
+  for (const auto &command : {"pair_source.telemetry.deep.state = 12345",
+                              "pair_source.telemetry.deep.state.snapshot = 12345",
+                              "pair_source.telemetry.deep.state.axes[2].position = 12345"}) {
+    const auto rejected = browser.expression(command);
+    BOOST_TEST(rejected.find("12345.0") == std::string::npos);
+  }
+  BOOST_TEST(state.data().snapshot == 71.0);
+  BOOST_TEST(state.data().axes[2].position == 0.0);
+  BOOST_TEST(browser.expression("pair_source.telemetry.deep.state.snapshot").find(" = 71") != std::string::npos);
+}
+
+BOOST_FIXTURE_TEST_CASE(taskbrowser_port_value_wins_over_a_same_named_attribute,
+                        TaskBrowserConnectionsFixture) {
+  RTT::InputPort<double> port("collision");
+  double attribute = 173.0;
+  sink.addPort(port);
+  sink.addAttribute("collision", attribute);
+  const auto value = browser.expression("collision");
+  BOOST_TEST_CONTEXT(value) {
+    BOOST_TEST(value.find(" = 0") != std::string::npos);
+    BOOST_TEST(value.find("173") == std::string::npos);
+  }
+  browser.expression("collision = 181.0");
+  BOOST_TEST(port.data() == 0.0);
+  BOOST_TEST(attribute == 173.0);
+}
+
+BOOST_FIXTURE_TEST_CASE(taskbrowser_unavailable_ports_do_not_supply_operation_arguments,
+                        TaskBrowserConnectionsFixture) {
+#if defined(HAS_EDITLINE) || (defined(HAS_READLINE) && !defined(NO_GPL))
+  BOOST_TEST(browser.complete("pair_source.telemetry.deep.output.").count("pair_source.telemetry.deep.output.x") == 1U);
+  BOOST_TEST(browser.complete("pair_source.telemetry.deep.state.axes[2].po").count("pair_source.telemetry.deep.state.axes[2].position") == 1U);
+#endif
+  for (const auto *command : {"scalar_source.output",
+                             "pair_source.telemetry.deep.output.x",
+                             "scalar_source.output + 1.0",
+                             "pair_source.telemetry.scale(scalar_source.output)"}) {
+    const auto value = browser.expression(command);
+    BOOST_TEST_CONTEXT(command << ": " << value) {
+      BOOST_TEST(value.find("unavailable") != std::string::npos);
+    }
+  }
+  BOOST_TEST(scale_calls == 0U);
+  scalar.data() = 191.0;
+  RTT::internal::PortDataAccess::commit(scalar);
+  BOOST_TEST(browser.expression("pair_source.telemetry.scale(scalar_source.output)").find(" = 382") != std::string::npos);
+  BOOST_TEST(scale_calls == 1U);
+}
+
+#if defined(HAS_EDITLINE) || (defined(HAS_READLINE) && !defined(NO_GPL))
+BOOST_FIXTURE_TEST_CASE(taskbrowser_completes_direct_port_members_and_fixed_arrays,
+                        TaskBrowserConnectionsFixture) {
+  RTT::internal::PortDataAccess::commit(pair);
+  RTT::internal::PortDataAccess::commit(state);
+  const auto ports = browser.complete("pair_source.telemetry.deep.ou");
+  BOOST_TEST_CONTEXT("port completions: " << boost::algorithm::join(ports, ", ")) {
+    BOOST_TEST(ports.count("pair_source.telemetry.deep.output") == 1U);
+  }
+  const auto members = browser.complete("pair_source.telemetry.deep.output.");
+  BOOST_TEST(members.count("pair_source.telemetry.deep.output.x") == 1U);
+  BOOST_TEST(members.count("pair_source.telemetry.deep.output.y") == 1U);
+  BOOST_TEST(members.count("pair_source.telemetry.deep.output.connected") == 0U);
+  BOOST_TEST(members.count("pair_source.telemetry.deep.output.snapshot") == 0U);
+  const auto array = browser.complete("pair_source.telemetry.deep.state.axes[2].po");
+  BOOST_TEST(array.count("pair_source.telemetry.deep.state.axes[2].position") == 1U);
+  const auto fields = browser.complete("pair_source.telemetry.deep.state.");
+  BOOST_TEST(fields.count("pair_source.telemetry.deep.state.connected") == 1U);
+  BOOST_TEST(fields.count("pair_source.telemetry.deep.state.connected()") == 0U);
+  BOOST_TEST(fields.count("pair_source.telemetry.deep.state.snapshot") == 1U);
+  BOOST_TEST(fields.count("pair_source.telemetry.deep.state.snapshot()") == 0U);
+  const auto services = browser.complete("pair_source.telemetry.sc");
+  BOOST_TEST(services.count("pair_source.telemetry.scale") == 1U);
+  BOOST_TEST(input.status() == RTT::NoData);
+}
+
+BOOST_FIXTURE_TEST_CASE(taskbrowser_port_completion_wins_over_a_same_named_peer,
+                        TaskBrowserConnectionsFixture) {
+  RTT::InputPort<renderer_test::Point> local("pair_source");
+  sink.addPort(local);
+  const auto value = browser.expression("pair_source");
+  BOOST_TEST(value.find("x: 0") != std::string::npos);
+  BOOST_TEST(value.find("Operations") == std::string::npos);
+  BOOST_TEST(browser.expression("pair_source.telemetry").find("Operations") == std::string::npos);
+  const auto members = browser.complete("pair_source.");
+  BOOST_TEST(members.count("pair_source.x") == 1U);
+  BOOST_TEST(members.count("pair_source.y") == 1U);
+  BOOST_TEST(members.count("pair_source.telemetry") == 0U);
+}
+#endif
+
+BOOST_FIXTURE_TEST_CASE(taskbrowser_lists_whole_and_member_sources_without_consuming_input,
+                        TaskBrowserConnectionsFixture) {
+  pair.data() = renderer_test::Point{10.0, 20.0};
+  scalar.data() = 100.0;
+  RTT::internal::PortDataAccess::commit(pair);
+  RTT::internal::PortDataAccess::commit(scalar);
+
+  const auto root = browser.listing();
+  BOOST_TEST(root.find("whole <- pair_source.telemetry.deep.output") != std::string::npos);
+  BOOST_TEST(root.find("In(C)") != std::string::npos);
+
+  for (const bool serviceHelp : {false, true}) {
+    const auto listing = browser.listing("io.deep", serviceHelp);
+    BOOST_TEST_CONTEXT((serviceHelp ? "help" : "ls") << " io.deep produced:\n" << listing) {
+      const auto x = listing.find("input.x <- scalar_source.output");
+      const auto y = listing.find("input.y <- pair_source.telemetry.deep.output.y");
+      BOOST_REQUIRE(x != std::string::npos);
+      BOOST_REQUIRE(y != std::string::npos);
+      BOOST_TEST(x < y);
+      BOOST_TEST(listing.find("selected <- pair_source.telemetry.deep.output.x") != std::string::npos);
+      BOOST_TEST(listing.find("unused <-") == std::string::npos);
+      BOOST_TEST(listing.find("result <-") == std::string::npos);
+      BOOST_TEST(listing.find("In(U)") != std::string::npos);
+      BOOST_TEST(listing.find("Out(U)") != std::string::npos);
+    }
+  }
+
+  BOOST_TEST(input.status() == RTT::NoData);
+  BOOST_REQUIRE(sink.start());
+  sink.getActivity()->execute();
+  BOOST_TEST(input.status() == RTT::NewData);
+  BOOST_TEST(input.data().x == 100.0);
+  BOOST_TEST(input.data().y == 20.0);
+  BOOST_TEST(whole.data().x == 10.0);
+  BOOST_TEST(selected.data() == 10.0);
+}
+
+BOOST_FIXTURE_TEST_CASE(taskbrowser_updates_sources_after_disconnect_and_reconnect,
+                        TaskBrowserConnectionsFixture) {
+  BOOST_REQUIRE(scalar.disconnect(&input));
+  BOOST_REQUIRE(RTT::connectMembers(replacement, "", input, "x"));
+  BOOST_REQUIRE(pair.disconnect(&whole));
+
+  const auto service = browser.listing("io.deep");
+  BOOST_TEST(service.find("input.x <- scalar_source.replacement") != std::string::npos);
+  BOOST_TEST(service.find("input.x <- scalar_source.output") == std::string::npos);
+  BOOST_TEST(service.find("input.y <- pair_source.telemetry.deep.output.y") != std::string::npos);
+  const auto root = browser.listing();
+  BOOST_TEST(root.find("whole <-") == std::string::npos);
+  BOOST_TEST(root.find("In(U)") != std::string::npos);
+}
+
+BOOST_FIXTURE_TEST_CASE(taskbrowser_lists_observed_proxy_values_without_connections,
+                        TaskBrowserFixture) {
+  RTT::InputPort<double> input("proxy_input");
+  RTT::OutputPort<double> output("proxy_output");
+  task.addPort(input);
+  task.addPort(output);
+  RTT::internal::PortDataAccess::setObservationSource(input, valueSource(151.0));
+  RTT::internal::PortDataAccess::setObservationSource(output, valueSource(157.0));
+  const auto listing = browser.listing();
+  BOOST_TEST_CONTEXT(listing) {
+    BOOST_TEST(listing.find("<= 151") != std::string::npos);
+    BOOST_TEST(listing.find("=> 157") != std::string::npos);
+    BOOST_TEST(listing.find("In(U)") != std::string::npos);
+    BOOST_TEST(listing.find("Out(U)") != std::string::npos);
+  }
+  BOOST_TEST((!input.connected() && !output.connected()));
+  BOOST_TEST(input.data() == 0.0);
+  BOOST_TEST(output.data() == 0.0);
+}
+
+BOOST_FIXTURE_TEST_CASE(taskbrowser_lists_one_coherent_observation_and_unavailable_outputs,
+                        TaskBrowserFixture) {
+  class ChangingPointSource : public RTT::internal::ValueDataSource<renderer_test::Point> {
+  public:
+    ChangingPointSource *clone() const override { return new ChangingPointSource; }
+    bool evaluate() const override {
+      const double next = this->value().x + 1.0;
+      const_cast<ChangingPointSource *>(this)->set({next, next});
+      return true;
+    }
+  };
+  RTT::OutputPort<renderer_test::Point> changing("changing");
+  RTT::OutputPort<double> pending("pending");
+  task.provides("telemetry")->addPort(changing);
+  task.provides("telemetry")->addPort(pending);
+  RTT::internal::PortDataAccess::setObservationSource(changing, new ChangingPointSource);
+  for (const bool help : {false, true}) {
+    const auto listing = browser.listing("telemetry", help);
+    BOOST_TEST_CONTEXT(listing) {
+      std::smatch fields;
+      BOOST_REQUIRE(std::regex_search(listing, fields,
+          std::regex("x: ([0-9.]+), y: ([0-9.]+)")));
+      BOOST_TEST(fields[1].str() == fields[2].str());
+      BOOST_TEST(listing.find("=> (unavailable)") != std::string::npos);
+    }
+  }
+}
 
 BOOST_FIXTURE_TEST_CASE(taskbrowser_prints_the_exact_named_value,
                         TaskBrowserFixture) {

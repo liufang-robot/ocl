@@ -129,6 +129,12 @@ OpcUaDeploymentService::OpcUaDeploymentService(DeploymentComponent &owner,
                      RTT::ClientThread)
       .doc("Returns diagnostics from a rejected component publication.")
       .arg("component", "RTT component name.");
+  opcua->addOperation("enableInputWrite", &OpcUaDeploymentService::enableInputWrite, this, RTT::ClientThread)
+      .doc("Enable an explicit OPC UA input source while the component graph is stopped.")
+      .arg("endpoint", "Component-qualified whole/member input endpoint.");
+  opcua->addOperation("disableInputWrite", &OpcUaDeploymentService::disableInputWrite, this, RTT::ClientThread)
+      .doc("Release an explicit OPC UA input source while the component graph is stopped.")
+      .arg("endpoint", "The exact component-qualified endpoint previously enabled.");
   opcua
       ->addOperation("publishComponent",
                      &OpcUaDeploymentService::publishComponent, this,
@@ -321,6 +327,41 @@ bool OpcUaDeploymentService::startOpcUa() {
     candidate.reset();
     return fail_start("failed to construct OPC UA object model");
   }
+}
+
+bool OpcUaDeploymentService::enableInputWrite(const std::string &endpoint) {
+  return setInputWriteEnabled(endpoint, true);
+}
+bool OpcUaDeploymentService::disableInputWrite(const std::string &endpoint) {
+  return setInputWriteEnabled(endpoint, false);
+}
+bool OpcUaDeploymentService::setInputWriteEnabled(const std::string &endpoint, bool enabled) {
+  if (!impl_) return false;
+  auto deployment = owner_.lockDeployment();
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  if (impl_->stopping.load() || owner_.deploymentShuttingDown() ||
+      impl_->state != Impl::State::running || !impl_->model) {
+    impl_->last_error = "OPC UA server is not running";
+    return false;
+  }
+  const auto separator = endpoint.find('.');
+  if (separator == std::string::npos || separator == 0 || separator + 1 == endpoint.size()) {
+    impl_->last_error = "expected component-qualified input endpoint";
+    return false;
+  }
+  const auto name = endpoint.substr(0, separator);
+  auto *component = name == owner_.getName() ? &owner_ : owner_.getPeer(name);
+  if (!component || owner_.isManagedProxy(component)) {
+    impl_->last_error = "no such local RTT component: " + name;
+    return false;
+  }
+  std::string error;
+  const auto relative = endpoint.substr(separator + 1);
+  const bool result = enabled
+      ? impl_->model->enableInputWrite(*component, relative, &error)
+      : impl_->model->disableInputWrite(*component, relative, &error);
+  impl_->last_error = result ? "" : std::move(error);
+  return result;
 }
 
 bool OpcUaDeploymentService::publishComponent(

@@ -22,7 +22,8 @@ class TestStateMachine
     Handle h;
 	// log a message
 	RTT::Operation<void(std::string)>					log_mtd;
-    InputPort<os::Timer::TimerId> receiver;
+    InputPort<std::uint64_t> extra_expirations;
+    InputPort<std::uint64_t> timeout_expirations;
 
 public:
     TestStateMachine(std::string name) :
@@ -30,8 +31,14 @@ public:
             log_mtd("log", &TestStateMachine::doLog, this)
     {
         addOperation( log_mtd ).doc("Log a message").arg("message", "Message to log");
-        addEventPort("TimerIn", receiver);
+        addPort("extra_expirations", extra_expirations);
+        addPort("timeout_expirations", timeout_expirations);
+        addOperation("extraCount", &TestStateMachine::extraCount, this, OwnThread);
+        addOperation("timeoutCount", &TestStateMachine::timeoutCount, this, OwnThread);
     }
+
+    std::uint64_t extraCount() const { return extra_expirations.data(); }
+    std::uint64_t timeoutCount() const { return timeout_expirations.data(); }
 
     bool startHook()
     {
@@ -102,7 +109,8 @@ int ORO_main( int, char** argv)
     peer.addPeer(&tcomp);
     peer.addPeer(&hmi);
 
-    peer.ports()->getPort("TimerIn")->connectTo( tcomp.ports()->getPort("timeout"));
+    peer.ports()->getPort("extra_expirations")->connectTo(tcomp.ports()->getPort("timer_5"));
+    peer.ports()->getPort("timeout_expirations")->connectTo(tcomp.ports()->getPort("timer_4"));
 
     std::string name = "testWithStateMachine.osd";
     assert (peer.getProvider<Scripting>("scripting"));

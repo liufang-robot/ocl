@@ -111,7 +111,7 @@ end
 -- @return the processed table
 function ConnPolicy2tab(cp)
    if cp.type == 0 then cp.type = "DATA"
-   elseif cp.type == 1 then cp.type = "BUFFER"
+   elseif cp.type == -1 then cp.type = "UNBUFFERED"
    else cp.type = tostring(cp.type) .. " (invalid!)" end
 
    if cp.lock_policy == 0 then cp.lock_policy = "UNSYNC"
@@ -397,13 +397,13 @@ function portval2str(port, comp)
    local value
    if inf.type == 'unknown_t' then value = "?"
    elseif inf.porttype == 'in' then
-      local fs, data = port:read()
+      local fs, data = port:status(), port:data()
 
       if fs == 'NoData' then value=' NoData'
       elseif fs == 'NewData' then value = green(var2str(data))
       else value = yellow(var2str(data)) end
    else
-      value = cyan(var2str(comp:provides(inf.name):getOperation("last")()))
+      value = cyan(var2str(port:snapshot()))
    end
    return portstr .. if_nl_ind(value)
 end
@@ -470,7 +470,7 @@ end
 -- Sample iface data structure for create_if function below.
 -- iface={
 --    ports={
---       { name='conf_events', datatype='String', type='in+event', desc="Configuration events in-port" },
+--       { name='configuration', datatype='String', type='in', desc="Current configuration input" },
 --       { name='foo', datatype='Int32', type='in', desc="numeric in-port" },
 --       { name='conf_status', datatype='String', type='out', desc="Current configuration status" },
 --    },
@@ -495,7 +495,10 @@ function create_if(iface, tc)
       assert(pspec.name, "missing port name in entry"..tostring(i))
       pspec.desc=pspec.desc or ""
 
-      -- probably should check if type and event match
+      if pspec.type~='in' and pspec.type~='out' then
+	 error("unknown port type "..tostring(pspec.type))
+      end
+
       if tc_has_port(tc, pspec.name) then
 	 res.ports[pspec.name] = tc:getPort(pspec.name)
 	 return
@@ -503,16 +506,10 @@ function create_if(iface, tc)
 
       if pspec.type=='out' then
 	 p=rtt.OutputPort(pspec.datatype)
-      elseif pspec.type=='in' or pspec.type=='in+event' then
+      else
 	 p=rtt.InputPort(pspec.datatype)
-      else
-	 error("unknown port type "..tostring(pspec.type))
       end
-      if pspec.type=='in+event' then
-	 tc:addEventPort(p, pspec.name, pspec.desc)
-      else
-	 tc:addPort(p, pspec.name, pspec.desc)
-      end
+      tc:addPort(p, pspec.name, pspec.desc)
       res.ports[pspec.name]=p
    end
 

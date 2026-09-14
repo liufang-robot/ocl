@@ -333,15 +333,38 @@ namespace OCL
          */
         bool createDataPortConnections(const bool skipUnconnected);
 
+        /** Declare a cyclic connection between exactly matching value types.
+         * Endpoints use component.service.port.member[index].nested, just like value
+         * expressions. Omit members to select the whole value. Both owners must be stopped.
+         */
+        bool connectPortData(const std::string& source, const std::string& destination);
+        /** Report any whole/member connection of a whole port. Rejects member paths. */
+        bool isPortConnected(const std::string& path);
+        /** Return a whole port's documentation. Empty for undocumented ports or invalid paths.
+         * Invalid paths are logged. Member selectors are rejected.
+         */
+        std::string getPortDescription(const std::string& path);
+        /** Return a whole port's direction: 0 = input, 1 = output, -1 = invalid path.
+         * Invalid paths are logged. Member selectors are rejected.
+         */
+        int getPortDirection(const std::string& path);
+        /** Return a whole port's canonical RTT type name, or empty for an invalid path.
+         * Invalid paths are logged. Member selectors are rejected.
+         */
+        std::string getPortType(const std::string& path);
+        /** Disconnect all writers/readers of a whole port while stopped. Rejects member paths. */
+        bool disconnectPort(const std::string& path);
+        /** Prepare every peer's cyclic connections while stopped. */
+        bool finalizeConnections();
+
         using TaskContext::connectPorts;
         /**
          * Establish a data flow connection between two tasks. The direction
          * of the connection is determined by the read/write port types.
          *
          * @note Using this function is not advised, since it relies on equal
-         * port names on both components. Use the alternative form of
-         * connectPorts() which specify component/service and
-         * port name.
+         * port names on both components. Use connectPortData() with the
+         * service-qualified output and input port names instead.
          *
          * @deprecated by connect()
          *
@@ -352,24 +375,6 @@ namespace OCL
          * data ports could be connected.
          */
         bool connectPorts(const std::string& one, const std::string& other);
-
-        /**
-         * Connect two named ports of components. The direction
-         * of the connection is determined by the read/write port types.
-         *
-         * @param one Name of the first component or a dot-separated path to its service
-         * @param one_port Name of the port of the first component to connect to
-         * \a other_port
-         * @param other Name of the second component or a dot-separated path to its service
-         * @param other_port Name of the port of the second component to connect
-         * to \a one_port
-         *
-         * @deprecated by connect()
-         *
-         * @return true if the ports are present and could be connected, false otherwise.
-         */
-        bool connectPorts(const std::string& one, const std::string& one_port,
-                          const std::string& other, const std::string& other_port);
 
         /**
          * Connect two named ports of components. The direction

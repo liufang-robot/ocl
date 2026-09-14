@@ -20,6 +20,9 @@ public:
   std::string httpState() const;
   std::string httpEndpointUrl() const;
   std::string httpLastError() const;
+  /** Configure a whole/member input writer while the component graph is stopped. */
+  bool enableInputWrite(const std::string &endpoint);
+  bool disableInputWrite(const std::string &endpoint);
   bool publishComponent(const std::string &name);
   std::vector<std::string>
   publicationDiagnostics(const std::string &name) const;
@@ -31,6 +34,7 @@ public:
   void finishDeploymentShutdown() noexcept override;
 
 private:
+  bool setInputWriteEnabled(const std::string &endpoint, bool enabled);
   explicit HttpDeploymentService(DeploymentComponent &owner);
   DeploymentComponent &owner_;
   class Impl;

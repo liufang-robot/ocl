@@ -4,6 +4,9 @@
 
   <!-- Component 3 , already loaded in the application ! -->
   <struct name="ComponentC" type="PropertyBag">
+    <struct name="Ports" type="PropertyBag">
+      <simple name="p1" type="string"><value>CConnection</value></simple>
+    </struct>
     <struct name="Activity" type="Activity">
       <simple name="Period" type="double"><value>0.41</value></simple>
       <simple name="Priority" type="short"><value>1</value></simple>
@@ -24,8 +27,7 @@
 
   <!-- Connection policy -->
   <struct name="AConnection" type="ConnPolicy">
-    <simple name="type" type="short"><value>1</value></simple>
-    <simple name="size" type="short"><value>12</value></simple>
+    <simple name="type" type="short"><value>0</value></simple>
   </struct>
 
   <!-- Component 1, already loaded in the application ! -->
@@ -86,7 +88,7 @@
     <simple name="AutoConf" type="boolean"><value>1</value></simple>
     <simple name="AutoStart" type="boolean"><value>1</value></simple>
     <struct name="Ports"  type="PropertyBag">
-        <simple name="d2" type="string"><value>AConnection</value></simple>
+        <simple name="d2" type="string"><value>CConnection</value></simple>
         <simple name="d1" type="string"><value>BConnection</value></simple>
     </struct>
   </struct>

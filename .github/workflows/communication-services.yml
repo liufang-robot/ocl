@@ -23,8 +23,20 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
+          repository: liufang-robot/rtt
+          ref: feat/automatic-cyclic-io
+          path: .ci/communication/rtt
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: liufang-robot/rtt_opcua
+          ref: feat/automatic-cyclic-io
+          path: .ci/communication/rtt_opcua
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
           repository: liufang-robot/rtt_http
-          ref: 12f82044af9f8c98191e9fc44cef410b74feb468
+          ref: feat/automatic-cyclic-io
           path: .ci/communication/rtt_http
           persist-credentials: false
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803

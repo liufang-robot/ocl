@@ -28,7 +28,7 @@ namespace OCL
 		std::string constant;
 
 		RTT::OutputPort<std::string> outport;
-		RTT::InputPort<std::string> bufferport;
+		RTT::InputPort<std::string> inport;
 
 		void null_0() {
 			Logger::log().logf(Logger::Warning, "Testcomp::null_0",
@@ -109,9 +109,9 @@ namespace OCL
 			  attribute("Hello World"),
 			  constant("Hello World"),
 			  // Name, initial value
-			  outport("the_results",true),
+			  outport("the_results"),
 			  // Name, policy
-			  bufferport("the_buffer_port",ConnPolicy::buffer(13,ConnPolicy::LOCK_FREE,true) )
+			  inport("the_input", ConnPolicy::data())
 		{
 
 #if 0
@@ -128,7 +128,7 @@ namespace OCL
 			this->addConstant("the_constant", constant);
 
 			this->ports()->addPort( outport ).doc("dummy test port");
-			this->ports()->addPort( bufferport );
+			this->ports()->addPort( inport );
 
 			this->addOperation( "null_0", &Testcomp::null_0, this, OwnThread ).doc("'null_0' Description");
 			this->addOperation( "op_0_ct", &Testcomp::op_0, this, ClientThread ).doc("'op_0_ct', ClientThread variant");

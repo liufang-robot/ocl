@@ -20,7 +20,7 @@ function new(type, ival)
 
 --- Convert a basic Variable to the corresponding Lua type.
 -- Normally this is done automatically by functions such as
--- <code>port:read()</code>.
+-- <code>port:data()</code>.
 function tolua()
 
 --- Return a table of types know to RTT.

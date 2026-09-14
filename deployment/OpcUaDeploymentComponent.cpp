@@ -33,6 +33,12 @@ std::string OpcUaDeploymentComponent::opcUaEndpointUrl() const {
 std::string OpcUaDeploymentComponent::opcUaLastError() const {
   return opcua().opcUaLastError();
 }
+bool OpcUaDeploymentComponent::enableInputWrite(const std::string &endpoint) {
+  return opcua().enableInputWrite(endpoint);
+}
+bool OpcUaDeploymentComponent::disableInputWrite(const std::string &endpoint) {
+  return opcua().disableInputWrite(endpoint);
+}
 bool OpcUaDeploymentComponent::publishComponent(const std::string &name) {
   return opcua().publishComponent(name);
 }

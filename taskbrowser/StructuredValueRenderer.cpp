@@ -1,4 +1,5 @@
 #include "internal/StructuredValueRenderer.hpp"
+#include <rtt/internal/ObservationPath.hpp>
 
 #include <rtt/internal/DataSource.hpp>
 #include <rtt/internal/DataSources.hpp>
@@ -398,6 +399,8 @@ StructuredValueRenderResult renderStructuredValue(
                              options.max_result_bytes > 3U ? options.max_result_bytes - 3U : 0U)};
     }
     return {StructuredValueRenderStatus::rendered, renderSnapshot(local.value, options)};
+  } catch (const RTT::internal::ObservationUnavailable &) {
+    return {StructuredValueRenderStatus::unavailable, {}};
   } catch (const std::exception &) {
     return {StructuredValueRenderStatus::evaluation_failed, {}};
   } catch (...) {

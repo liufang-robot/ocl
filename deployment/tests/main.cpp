@@ -112,7 +112,11 @@ int ORO_main(int, char**)
         dc.addPeer( &t4 );
         dc.addPeer( &p );
         dc.addPeer( &r );
-        dc.kickStart("deployment.cpf");
+        if (!dc.kickStart("deployment.cpf")) {
+            RTT::Logger::log().logf(RTT::Logger::Fatal, "deployment tests",
+                                    "Fixture deployment failed.");
+            return 1;
+        }
 
 #if defined(RTT_VERSION_GTE)
 #if RTT_VERSION_GTE(2,8,99)

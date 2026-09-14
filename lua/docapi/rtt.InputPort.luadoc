@@ -11,11 +11,15 @@ module 'rtt.InputPort'
 -- @param desc (optional) description of port
 function new(type, name, desc)
 
---- Read from an input port.
--- @param variable (optional). If provided the result will be stored in this variable. This avoids a memory allocation.
--- @return FlowStatus string ('NoData', 'NewData', 'OldData')
--- @return Variable (only in case of NewData or OldData and if no parameter Variable is provided)
-function read(variable)
+--- Copy the stable input process image without consuming data.
+-- Available while stopped or in the owning component's execution context.
+-- Returned values are detached copies; modifying them does not modify the input.
+-- @return Current image as a Variable or coerced Lua scalar.
+function data()
+
+--- Observe freshness of the current input image without consuming data.
+-- @return FlowStatus string ('NoData', 'NewData', 'OldData').
+function status()
 
 --- Return information about a port.
 -- The information is stored in a table with the fields:<br><br>
@@ -31,8 +35,11 @@ function info()
 --- Connect this port to a second one.
 -- For this ports do not have to be added to a TaskContext interface.
 -- @param port the port to connect to.
+-- @param policy optional rtt.Variable.new("ConnPolicy") with type DATA (0).
+-- Omit this argument to use the default policy. Unsupported argument types and
+-- removed numeric FIFO/circular-buffer policy values raise an error.
 -- @return boolean flag if connecting succeeded or not.
-function connect(port)
+function connect(port, policy)
 
 --- Disconnect this port.
 -- For this ports do not have to be added to a TaskContext interface.

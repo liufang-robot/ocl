@@ -68,13 +68,6 @@ function getPortNames()
 -- @param desc description of port (optional)
 function addPort(port, name, desc)
 
---- Add a port as an event driven to the TaskContext interface.
--- When data is received on this port the TaskContext will be triggered.
--- @param port
--- @param name name of port (optional)
--- @param desc description of port (optional)
-function addEventPort(port, name, desc)
-
 --- Get a port of a TaskContext interface.
 -- @param string name of port
 -- @return Port

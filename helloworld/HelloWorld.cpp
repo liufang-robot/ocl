@@ -71,9 +71,9 @@ namespace OCL
          */
         RTT::OutputPort<std::string> outport;
         /**
-         * This RTT::InputPort buffers incoming data.
+         * This RTT::InputPort exposes the latest cyclic input image.
          */
-        RTT::InputPort<std::string> bufferport;
+        RTT::InputPort<std::string> inport;
         /** @} */
 
         /**
@@ -103,12 +103,11 @@ namespace OCL
         		flag = false;
         	}
 
-            outport.write("Hello World!");
+            outport.data() = "Hello World!";
 
-            std::string sample;
-            while(bufferport.read(sample) == NewData) {
+            if (inport.status() == NewData) {
                 Logger::log().logf(Logger::Debug, "HelloWorld::updateHook",
-                                   "Received %s", sample.c_str());
+                                   "Received %s", inport.data().c_str());
             }
         }
     public:
@@ -123,9 +122,9 @@ namespace OCL
               attribute("Hello Attribute"),
               constant("Hello Constant"),
               // Name, initial value
-              outport("the_results",true),
+              outport("the_results"),
               // Name, policy
-              bufferport("the_buffer_port",ConnPolicy::buffer(13,ConnPolicy::LOCK_FREE,true) )
+              inport("the_input")
         {
             // New activity with period 0.1s and priority 0.
             this->setActivity( new Activity(0, 0.1) );
@@ -138,7 +137,7 @@ namespace OCL
             this->addConstant("the_constant", constant);
 
             this->ports()->addPort( outport );
-            this->ports()->addPort( bufferport );
+            this->ports()->addPort( inport );
 
             this->addOperation( "the_method", &HelloWorld::mymethod, this, ClientThread ).doc("'the_method' Description");
 

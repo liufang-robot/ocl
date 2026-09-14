@@ -31,6 +31,9 @@ public:
   bool opcUaIsRunning() const;
   std::string opcUaEndpointUrl() const;
   std::string opcUaLastError() const;
+  /** Configure a whole/member input writer while the component graph is stopped. */
+  bool enableInputWrite(const std::string &endpoint);
+  bool disableInputWrite(const std::string &endpoint);
   bool publishComponent(const std::string &component_name);
   bool publishComponentSelected(const std::string &component_name,
                                 const std::vector<std::string> &selectors);
@@ -52,6 +55,7 @@ public:
   void finishDeploymentShutdown() noexcept override;
 
 private:
+  bool setInputWriteEnabled(const std::string &endpoint, bool enabled);
   OpcUaDeploymentService(DeploymentComponent &owner,
                          OpcUaDeploymentOptions options);
   DeploymentComponent &owner_;

@@ -1,6 +1,7 @@
 StateMachine testWithStateMachine_SM
 {
-	var Int32 timerID=-1;
+	var UInt64 previousExtra=0;
+	var UInt64 previousTimeout=0;
 
 	// allocation of timers IDs
 	var Int32 ID_WAIT=3;
@@ -53,14 +54,14 @@ StateMachine testWithStateMachine_SM
 	{
 	  entry {
             do log("Starting TEST_3");
+            set previousExtra = extraCount();
 	    do Timer.arm(ID_EXTRA, 1.0);
 	  }
 	  run
 	    {
 	      do log("Waiting for timeout ...");
 	    }
-	  transition TimerIn(timerID)
-	    if timerID == ID_EXTRA then select TEST_4
+	  transitions { if extraCount() != previousExtra then select TEST_4 }
 	}
 
 	//**************************************************************************
@@ -68,16 +69,15 @@ StateMachine testWithStateMachine_SM
 	{
 	  entry {
             do log("Starting TEST_4") ;
+            set previousTimeout = timeoutCount();
 	    do Timer.arm(ID_TIMEOUT, 1.1);
 	  }
 	  run
 	    {
 	      do log("Waiting for timeout ...");
 	    }
-	  transition TimerIn(timerID)
-	    if timerID == ID_TIMEOUT then select DONE
-	      else { do log("wrong timeout !"); do hmi.logInt(timerID); } select ERROR
-		     }
+	  transitions { if timeoutCount() != previousTimeout then select DONE }
+        }
 	//**************************************************************************
 	state DONE
 	{

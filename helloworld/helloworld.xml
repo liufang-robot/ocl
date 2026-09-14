@@ -30,14 +30,13 @@
   </struct>
 
   <struct name="Ports" type="PropertyBag">
-      <simple name="the_buffer_port" type="string"><value>Connection</value></simple>
+      <simple name="the_input" type="string"><value>Connection</value></simple>
   </struct>
 
 </struct>
 
 <struct name="Connection" type="ConnPolicy">
-    <simple name="type" type="long"><value>1</value></simple>
-    <simple name="size" type="long"><value>12</value></simple>
+    <simple name="type" type="long"><value>0</value></simple>
 </struct>
 
 </properties>

@@ -175,6 +175,12 @@ HttpDeploymentService::HttpDeploymentService(DeploymentComponent &owner)
                RTT::ClientThread);
   addOperation("lastError", &HttpDeploymentService::httpLastError, this,
                RTT::ClientThread);
+  addOperation("enableInputWrite", &HttpDeploymentService::enableInputWrite, this, RTT::ClientThread)
+      .doc("Enable an explicit HTTP input source while the component graph is stopped.")
+      .arg("endpoint", "Component-qualified whole/member input endpoint.");
+  addOperation("disableInputWrite", &HttpDeploymentService::disableInputWrite, this, RTT::ClientThread)
+      .doc("Release an explicit HTTP input source while the component graph is stopped.")
+      .arg("endpoint", "The exact component-qualified endpoint previously enabled.");
   addOperation("publishComponent", &HttpDeploymentService::publishComponent,
                this, RTT::ClientThread)
       .arg("component", "Local application component name");
@@ -280,6 +286,30 @@ bool HttpDeploymentService::publishComponent(const std::string &name) {
   const bool published =
       impl_->configuration->server->publishComponent(*component, &error);
   return impl_->report(published, std::move(error));
+}
+bool HttpDeploymentService::enableInputWrite(const std::string &endpoint) {
+  return setInputWriteEnabled(endpoint, true);
+}
+bool HttpDeploymentService::disableInputWrite(const std::string &endpoint) {
+  return setInputWriteEnabled(endpoint, false);
+}
+bool HttpDeploymentService::setInputWriteEnabled(const std::string &endpoint, bool enabled) {
+  auto deployment = owner_.lockDeployment();
+  if (owner_.deploymentShuttingDown())
+    return impl_->report(false, "HTTP deployment is shutting down");
+  const auto separator = endpoint.find('.');
+  if (separator == std::string::npos || separator == 0 || separator + 1 == endpoint.size())
+    return impl_->report(false, "expected component-qualified input endpoint");
+  const auto name = endpoint.substr(0, separator);
+  auto *component = owner_.getPeer(name);
+  if (!component || owner_.isManagedProxy(component))
+    return impl_->report(false, "no such local application component: " + name);
+  std::string error;
+  const auto relative = endpoint.substr(separator + 1);
+  const bool result = enabled
+      ? impl_->configuration->server->enableInputWrite(*component, relative, &error)
+      : impl_->configuration->server->disableInputWrite(*component, relative, &error);
+  return impl_->report(result, std::move(error));
 }
 std::vector<std::string>
 HttpDeploymentService::publicationDiagnostics(const std::string &name) const {

@@ -25,3 +25,15 @@ IF ( BUILD_REPORTING_TEST )
 
 ENDIF ( BUILD_REPORTING_TEST )
 
+
+if(BUILD_TESTING)
+  add_executable(ocl_cyclic_reporting_test cyclic_reporting_test.cpp)
+  orocos_configure_executable(ocl_cyclic_reporting_test)
+  target_link_libraries(ocl_cyclic_reporting_test orocos-ocl-reporting ${OROCOS-RTT_TYPEKIT_LIBRARIES})
+  add_test(NAME ocl_cyclic_reporting COMMAND ocl_cyclic_reporting_test)
+endif()
+
+if(BUILD_TESTING)
+  set_tests_properties(ocl_cyclic_reporting PROPERTIES
+    ENVIRONMENT "RTT_COMPONENT_PATH=${CMAKE_INSTALL_PREFIX}/lib/orocos;OROCOS_TARGET=${OROCOS_TARGET}")
+endif()
