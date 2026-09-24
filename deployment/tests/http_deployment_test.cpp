@@ -1,6 +1,7 @@
+// Parse httplib before RTT's Xenomai headers introduce the read_lock macro.
+#include <httplib.h>
 #include "deployment/HttpDeploymentService.hpp"
 #include <future>
-#include <httplib.h>
 #include <iostream>
 #include <rtt/OperationCaller.hpp>
 #include <rtt/Property.hpp>
